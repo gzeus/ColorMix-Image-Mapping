@@ -9,6 +9,7 @@ export type ImageMappingSettings = {
   offsetV: number;
   scale: number;
   mirrorX: boolean;
+  flipY: boolean;
   repeatX: boolean;
 };
 

@@ -13,7 +13,7 @@ import type { ImageMappingSettings, MeshData, ReliefSettings, ShapeSettings } fr
 import { createProcessedCanvas, drawMappedImagePreview, fileToCanvas, makeImageSampler } from '../lib/imageSampling';
 import { quantizeCanvas } from '../lib/quantization';
 
-const defaultMapping: ImageMappingSettings = { fitMode: 'stretch', offsetU: 0, offsetV: 0, scale: 1, mirrorX: false, repeatX: true };
+const defaultMapping: ImageMappingSettings = { fitMode: 'stretch', offsetU: 0, offsetV: 0, scale: 1, mirrorX: false, flipY: true, repeatX: true };
 const defaultShape: ShapeSettings = {
   type: 'cylinder',
   heightMm: 110,
@@ -40,6 +40,7 @@ export default function App() {
   const [colorCount, setColorCount] = useState(4);
   const [useFilamentPalette, setUseFilamentPalette] = useState(false);
   const [palette, setPalette] = useState<PaletteColor[]>(fallbackPalette);
+  const [insideMaterialIndex, setInsideMaterialIndex] = useState(1);
   const [mesh, setMesh] = useState<MeshData | null>(null);
   const [status, setStatus] = useState('Ready for an image.');
   const [isExporting, setIsExporting] = useState(false);
@@ -78,13 +79,13 @@ export default function App() {
     const timer = window.setTimeout(() => {
       const sampler = makeImageSampler(processedCanvas, mapping);
       const nextMesh = shape.type === 'cylinder'
-        ? generateCylinder(shape, palette, sampler, relief)
-        : generateVase(shape, palette, sampler, relief);
+        ? generateCylinder(shape, sampler, relief, palette, insideMaterialIndex)
+        : generateVase(shape, sampler, relief, palette, insideMaterialIndex);
       setMesh(nextMesh);
       setStatus('Preview ready. 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.');
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [mapping, palette, processedCanvas, relief, shape]);
+  }, [insideMaterialIndex, mapping, palette, processedCanvas, relief, shape]);
 
   const loadImage = async (file: File) => {
     setStatus('Loading image...');
@@ -123,6 +124,7 @@ export default function App() {
       while (next.length < count) next.push(makePaletteColor('#dddddd', next.length));
       setPalette(next.slice(0, count));
     }
+    setInsideMaterialIndex((current) => Math.min(current, count - 1));
   };
 
   return (
@@ -137,10 +139,12 @@ export default function App() {
         <PaletteControls
           colorCount={colorCount}
           palette={palette}
+          insideMaterialIndex={insideMaterialIndex}
           useFilamentPalette={useFilamentPalette}
           onColorCountChange={handleColorCountChange}
           onUseFilamentPaletteChange={setUseFilamentPalette}
           onPaletteChange={setPalette}
+          onInsideMaterialChange={setInsideMaterialIndex}
         />
         <ReliefControls settings={relief} onChange={setRelief} />
       </aside>

@@ -81,7 +81,7 @@ export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSett
 
   return (u: number, v: number): Rgba => {
     let mappedU = settings.mirrorX ? 1 - u : u;
-    let mappedV = v;
+    let mappedV = settings.flipY ? 1 - v : v;
     mappedU = (mappedU - 0.5) / settings.scale + 0.5 + settings.offsetU;
     mappedV = (mappedV - 0.5) / settings.scale + 0.5 + settings.offsetV;
 

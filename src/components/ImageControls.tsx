@@ -56,6 +56,7 @@ export function ImageControls({ imageUrl, mapping, mappedPreviewUrl, onImageChan
         <output>{mapping.offsetV.toFixed(2)}</output>
       </label>
       <label className="check-row"><input type="checkbox" checked={mapping.mirrorX} onChange={(event) => patch({ mirrorX: event.target.checked })} /> Mirror horizontally</label>
+      <label className="check-row"><input type="checkbox" checked={mapping.flipY} onChange={(event) => patch({ flipY: event.target.checked })} /> Flip vertically</label>
       <label className="check-row"><input type="checkbox" checked={mapping.repeatX} onChange={(event) => patch({ repeatX: event.target.checked })} /> Repeat horizontally</label>
     </section>
   );

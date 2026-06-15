@@ -32,6 +32,46 @@ function encodePrusaTriangleState(state: number): string {
   return output;
 }
 
+function repairMeshForExport(mesh: MeshData): MeshData {
+  const vertexMap = new Map<string, number>();
+  const vertices: number[] = [];
+  const remap: number[] = [];
+  const precision = 100000;
+
+  for (let i = 0; i < mesh.vertices.length; i += 3) {
+    const x = Math.round(mesh.vertices[i] * precision) / precision;
+    const y = Math.round(mesh.vertices[i + 1] * precision) / precision;
+    const z = Math.round(mesh.vertices[i + 2] * precision) / precision;
+    const key = `${x},${y},${z}`;
+    let nextIndex = vertexMap.get(key);
+    if (nextIndex === undefined) {
+      nextIndex = vertices.length / 3;
+      vertexMap.set(key, nextIndex);
+      vertices.push(x, y, z);
+    }
+    remap[i / 3] = nextIndex;
+  }
+
+  const triangleKeys = new Set<string>();
+  const triangles: MeshData['triangles'] = [];
+  mesh.triangles.forEach((triangle) => {
+    const a = remap[triangle.a];
+    const b = remap[triangle.b];
+    const c = remap[triangle.c];
+    if (a === b || b === c || a === c) {
+      return;
+    }
+    const sorted = [a, b, c].sort((left, right) => left - right).join(',');
+    if (triangleKeys.has(sorted)) {
+      return;
+    }
+    triangleKeys.add(sorted);
+    triangles.push({ ...triangle, a, b, c });
+  });
+
+  return { ...mesh, vertices, triangles };
+}
+
 function contentTypesXml(): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -66,11 +106,44 @@ function modelConfigXml(mesh: MeshData): string {
 }
 
 function prusaFullSpectrumJson(mesh: MeshData): string {
+  const physicalExtruders = mesh.materials.slice(0, 2).map((material, index) => ({
+    color: material.hex.toUpperCase(),
+    id: index + 1,
+  }));
+
+  if (physicalExtruders.length === 1) {
+    physicalExtruders.push({ color: physicalExtruders[0].color, id: 2 });
+  }
+
+  const virtualExtruders = mesh.materials.slice(2).map((material, offset) => {
+    const paletteIndex = offset + 2;
+    const denominator = Math.max(1, mesh.materials.length - 1);
+    const highlightRatio = Math.round(((paletteIndex - 1) / denominator) * 10000) / 10000;
+    const shadowRatio = Math.round(((mesh.materials.length - paletteIndex) / denominator) * 10000) / 10000;
+    return {
+      color: material.hex.toUpperCase(),
+      components: [
+        { extruder: 1, ratio: highlightRatio },
+        { extruder: 2, ratio: shadowRatio },
+      ],
+      id: paletteIndex + 1,
+      kind: 'fullspectrum',
+    };
+  });
+
   return JSON.stringify({
-    physical_extruders: mesh.materials.map((material, index) => ({ color: material.hex.toUpperCase(), id: index + 1 })),
+    physical_extruders: physicalExtruders,
     version: 1,
-    virtual_extruders: [],
-  }, null, 2);
+    virtual_extruders: virtualExtruders,
+  }, null, 4);
+}
+
+function prusaProjectConfig(mesh: MeshData): string {
+  const physicalColors = mesh.materials.slice(0, 2).map((material) => material.hex.toUpperCase());
+  if (physicalColors.length === 1) {
+    physicalColors.push(physicalColors[0]);
+  }
+  return `; extruder_colour = ${physicalColors.join(';')}\n`;
 }
 
 function modelXml(mesh: MeshData): string {
@@ -108,13 +181,14 @@ function modelXml(mesh: MeshData): string {
 }
 
 export async function export3mf(mesh: MeshData, fileName: string): Promise<void> {
+  const repairedMesh = repairMeshForExport(mesh);
   const zip = new JSZip();
   zip.file('[Content_Types].xml', contentTypesXml());
   zip.file('_rels/.rels', relsXml());
-  zip.file('3D/3dmodel.model', modelXml(mesh));
-  zip.file('Metadata/Slic3r_PE.config', `; extruder_colour = ${mesh.materials.map((material) => material.hex.toUpperCase()).join(';')}\n`);
-  zip.file('Metadata/Slic3r_PE_model.config', modelConfigXml(mesh));
-  zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(mesh));
+  zip.file('3D/3dmodel.model', modelXml(repairedMesh));
+  zip.file('Metadata/Slic3r_PE.config', prusaProjectConfig(repairedMesh));
+  zip.file('Metadata/Slic3r_PE_model.config', modelConfigXml(repairedMesh));
+  zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(repairedMesh));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const url = URL.createObjectURL(new Blob([blob], { type: 'model/3mf' }));
   const anchor = document.createElement('a');

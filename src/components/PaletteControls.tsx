@@ -5,12 +5,23 @@ type Props = {
   colorCount: number;
   useFilamentPalette: boolean;
   palette: PaletteColor[];
+  insideMaterialIndex: number;
   onColorCountChange: (count: number) => void;
   onUseFilamentPaletteChange: (enabled: boolean) => void;
   onPaletteChange: (palette: PaletteColor[]) => void;
+  onInsideMaterialChange: (index: number) => void;
 };
 
-export function PaletteControls({ colorCount, useFilamentPalette, palette, onColorCountChange, onUseFilamentPaletteChange, onPaletteChange }: Props) {
+export function PaletteControls({
+  colorCount,
+  useFilamentPalette,
+  palette,
+  insideMaterialIndex,
+  onColorCountChange,
+  onUseFilamentPaletteChange,
+  onPaletteChange,
+  onInsideMaterialChange,
+}: Props) {
   const updateColor = (index: number, hex: string) => {
     const next = [...palette];
     next[index] = makePaletteColor(hex, index, next[index]?.name ?? `Material ${index + 1}`);
@@ -34,6 +45,16 @@ export function PaletteControls({ colorCount, useFilamentPalette, palette, onCol
           </label>
         ))}
       </div>
+      <label className="field">
+        <span>Inside / unpainted</span>
+        <select value={Math.min(insideMaterialIndex, palette.length - 1)} onChange={(event) => onInsideMaterialChange(Number(event.target.value))}>
+          {palette.map((color, index) => (
+            <option key={color.id} value={index}>
+              {index + 1} - {color.hex.toUpperCase()}
+            </option>
+          ))}
+        </select>
+      </label>
     </section>
   );
 }
