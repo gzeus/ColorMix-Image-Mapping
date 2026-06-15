@@ -11,6 +11,7 @@ export type ImageMappingSettings = {
   mirrorX: boolean;
   flipY: boolean;
   repeatX: boolean;
+  repeatY: boolean;
 };
 
 export type ShapeSettings = {

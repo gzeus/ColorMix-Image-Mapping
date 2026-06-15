@@ -7,6 +7,7 @@ export type PaletteColor = {
   g: number;
   b: number;
   hex: string;
+  components?: Array<{ extruder: number; ratio: number }>;
 };
 
 export function clamp(value: number, min: number, max: number): number {

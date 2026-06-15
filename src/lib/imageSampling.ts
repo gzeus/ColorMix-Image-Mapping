@@ -96,7 +96,7 @@ export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSett
     }
 
     mappedU = settings.repeatX ? positiveModulo(mappedU, 1) : clamp(mappedU, 0, 1);
-    mappedV = clamp(mappedV, 0, 1);
+    mappedV = settings.repeatY ? positiveModulo(mappedV, 1) : clamp(mappedV, 0, 1);
 
     const x = clamp(Math.round(mappedU * (canvas.width - 1)), 0, canvas.width - 1);
     const y = clamp(Math.round(mappedV * (canvas.height - 1)), 0, canvas.height - 1);

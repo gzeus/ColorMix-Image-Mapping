@@ -106,7 +106,9 @@ function modelConfigXml(mesh: MeshData): string {
 }
 
 function prusaFullSpectrumJson(mesh: MeshData): string {
-  const physicalExtruders = mesh.materials.slice(0, 2).map((material, index) => ({
+  const maxComponentExtruder = Math.max(0, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
+  const physicalCount = Math.max(2, maxComponentExtruder || Math.min(2, mesh.materials.length));
+  const physicalExtruders = mesh.materials.slice(0, physicalCount).map((material, index) => ({
     color: material.hex.toUpperCase(),
     id: index + 1,
   }));
@@ -115,14 +117,14 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
     physicalExtruders.push({ color: physicalExtruders[0].color, id: 2 });
   }
 
-  const virtualExtruders = mesh.materials.slice(2).map((material, offset) => {
-    const paletteIndex = offset + 2;
+  const virtualExtruders = mesh.materials.slice(physicalCount).map((material, offset) => {
+    const paletteIndex = offset + physicalCount;
     const denominator = Math.max(1, mesh.materials.length - 1);
     const highlightRatio = Math.round(((paletteIndex - 1) / denominator) * 10000) / 10000;
     const shadowRatio = Math.round(((mesh.materials.length - paletteIndex) / denominator) * 10000) / 10000;
     return {
       color: material.hex.toUpperCase(),
-      components: [
+      components: material.components ?? [
         { extruder: 1, ratio: highlightRatio },
         { extruder: 2, ratio: shadowRatio },
       ],
@@ -139,7 +141,9 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
 }
 
 function prusaProjectConfig(mesh: MeshData): string {
-  const physicalColors = mesh.materials.slice(0, 2).map((material) => material.hex.toUpperCase());
+  const maxComponentExtruder = Math.max(0, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
+  const physicalCount = Math.max(2, maxComponentExtruder || Math.min(2, mesh.materials.length));
+  const physicalColors = mesh.materials.slice(0, physicalCount).map((material) => material.hex.toUpperCase());
   if (physicalColors.length === 1) {
     physicalColors.push(physicalColors[0]);
   }

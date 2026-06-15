@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExportPanel } from './ExportPanel';
 import { ImageControls } from './ImageControls';
 import { PaletteControls } from './PaletteControls';
 import { Preview3D } from './Preview3D';
 import { ReliefControls } from './ReliefControls';
 import { ShapeControls } from './ShapeControls';
+import { buildColorMixPalette, defaultColorMixFilaments } from '../lib/colorMix';
 import { makePaletteColor, type PaletteColor } from '../lib/colorUtils';
 import { export3mf } from '../lib/export/export3mf';
 import { generateCylinder } from '../lib/geometry/generateCylinder';
@@ -13,7 +14,7 @@ import type { ImageMappingSettings, MeshData, ReliefSettings, ShapeSettings } fr
 import { createProcessedCanvas, drawMappedImagePreview, fileToCanvas, makeImageSampler } from '../lib/imageSampling';
 import { quantizeCanvas } from '../lib/quantization';
 
-const defaultMapping: ImageMappingSettings = { fitMode: 'stretch', offsetU: 0, offsetV: 0, scale: 1, mirrorX: false, flipY: true, repeatX: true };
+const defaultMapping: ImageMappingSettings = { fitMode: 'stretch', offsetU: 0, offsetV: 0, scale: 1, mirrorX: false, flipY: false, repeatX: true, repeatY: false };
 const defaultShape: ShapeSettings = {
   type: 'cylinder',
   heightMm: 110,
@@ -38,22 +39,27 @@ export default function App() {
   const [shape, setShape] = useState(defaultShape);
   const [relief, setRelief] = useState(defaultRelief);
   const [colorCount, setColorCount] = useState(4);
-  const [useFilamentPalette, setUseFilamentPalette] = useState(false);
+  const [lockManualPalette, setLockManualPalette] = useState(false);
   const [palette, setPalette] = useState<PaletteColor[]>(fallbackPalette);
+  const [colorMixEnabled, setColorMixEnabled] = useState(false);
+  const [colorMixFilaments, setColorMixFilaments] = useState<PaletteColor[]>(defaultColorMixFilaments());
   const [insideMaterialIndex, setInsideMaterialIndex] = useState(1);
   const [mesh, setMesh] = useState<MeshData | null>(null);
   const [status, setStatus] = useState('Ready for an image.');
   const [isExporting, setIsExporting] = useState(false);
+  const [triangulateBeforeExport, setTriangulateBeforeExport] = useState(false);
 
   const processedCanvas = useMemo(() => (imageCanvas ? createProcessedCanvas(imageCanvas, relief.blurPx) : null), [imageCanvas, relief.blurPx]);
+  const colorMixPalette = useMemo(() => buildColorMixPalette(colorMixFilaments), [colorMixFilaments]);
+  const effectivePalette = colorMixEnabled ? colorMixPalette : palette;
 
   useEffect(() => {
-    if (!processedCanvas || useFilamentPalette) {
+    if (!processedCanvas || lockManualPalette || colorMixEnabled) {
       return;
     }
     setStatus('Quantizing image...');
     setPalette(quantizeCanvas(processedCanvas, colorCount));
-  }, [colorCount, processedCanvas, useFilamentPalette]);
+  }, [colorCount, colorMixEnabled, lockManualPalette, processedCanvas]);
 
   useEffect(() => {
     if (!processedCanvas) {
@@ -70,22 +76,42 @@ export default function App() {
     });
   }, [mapping, processedCanvas]);
 
+  const buildMesh = useCallback((mode: 'preview' | 'export' | 'highExport'): MeshData | null => {
+    if (!processedCanvas || effectivePalette.length === 0) {
+      return null;
+    }
+    const sampler = makeImageSampler(processedCanvas, mapping);
+    const nextShape = mode === 'preview'
+      ? {
+          ...shape,
+          radialSegments: Math.min(160, Math.round(shape.radialSegments)),
+          heightSegments: Math.min(160, Math.round(shape.heightSegments)),
+        }
+      : mode === 'highExport'
+      ? {
+          ...shape,
+          radialSegments: Math.min(1024, Math.round(shape.radialSegments * 2)),
+          heightSegments: Math.min(1024, Math.round(shape.heightSegments * 2)),
+        }
+      : shape;
+    return nextShape.type === 'cylinder'
+      ? generateCylinder(nextShape, sampler, relief, effectivePalette, insideMaterialIndex)
+      : generateVase(nextShape, sampler, relief, effectivePalette, insideMaterialIndex);
+  }, [effectivePalette, insideMaterialIndex, mapping, processedCanvas, relief, shape]);
+
   useEffect(() => {
-    if (!processedCanvas || palette.length === 0) {
+    if (!processedCanvas || effectivePalette.length === 0) {
       setMesh(null);
       return;
     }
-    setStatus('Generating mesh...');
+    setStatus('Generating preview...');
     const timer = window.setTimeout(() => {
-      const sampler = makeImageSampler(processedCanvas, mapping);
-      const nextMesh = shape.type === 'cylinder'
-        ? generateCylinder(shape, sampler, relief, palette, insideMaterialIndex)
-        : generateVase(shape, sampler, relief, palette, insideMaterialIndex);
+      const nextMesh = buildMesh('preview');
       setMesh(nextMesh);
-      setStatus('Preview ready. 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.');
-    }, 120);
+      setStatus(nextMesh ? 'Preview ready. 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.' : 'Upload an image to generate the preview.');
+    }, 220);
     return () => window.clearTimeout(timer);
-  }, [insideMaterialIndex, mapping, palette, processedCanvas, relief, shape]);
+  }, [buildMesh, effectivePalette.length, processedCanvas]);
 
   const loadImage = async (file: File) => {
     setStatus('Loading image...');
@@ -94,21 +120,23 @@ export default function App() {
       if (imageUrl) URL.revokeObjectURL(imageUrl);
       setImageUrl(URL.createObjectURL(file));
       setImageCanvas(canvas);
-      setStatus('Image loaded.');
+      setMesh(null);
+      setStatus('Image loaded. Generating preview...');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Image failed to load.');
     }
   };
 
   const handleExport = async () => {
-    if (!mesh) {
+    const exportMesh = buildMesh(triangulateBeforeExport ? 'highExport' : 'export') ?? mesh;
+    if (!exportMesh) {
       setStatus('Generate a mesh before exporting.');
       return;
     }
     setIsExporting(true);
     setStatus('Exporting 3MF...');
     try {
-      await export3mf(mesh, mesh.name);
+      await export3mf(exportMesh, exportMesh.name);
       setStatus('Exported 3MF with face material colors and Prusa metadata.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '3MF export failed.');
@@ -119,7 +147,7 @@ export default function App() {
 
   const handleColorCountChange = (count: number) => {
     setColorCount(count);
-    if (useFilamentPalette) {
+    if (lockManualPalette) {
       const next = [...palette];
       while (next.length < count) next.push(makePaletteColor('#dddddd', next.length));
       setPalette(next.slice(0, count));
@@ -133,24 +161,46 @@ export default function App() {
         <header>
           <p className="eyebrow">Client-side 3MF generator</p>
           <h1>3D Image Mapper</h1>
+          <div className="header-actions">
+            <button type="button" className="primary-button" onClick={handleExport} disabled={isExporting || (!mesh && !processedCanvas)}>
+              {isExporting ? 'Exporting...' : 'Export 3MF'}
+            </button>
+          </div>
         </header>
         <ImageControls imageUrl={imageUrl} mapping={mapping} mappedPreviewUrl={mappedPreviewUrl} onImageChange={loadImage} onMappingChange={setMapping} />
         <ShapeControls settings={shape} onChange={setShape} />
         <PaletteControls
           colorCount={colorCount}
           palette={palette}
+          colorMixEnabled={colorMixEnabled}
+          colorMixFilaments={colorMixFilaments}
+          colorMixPalette={colorMixPalette}
           insideMaterialIndex={insideMaterialIndex}
-          useFilamentPalette={useFilamentPalette}
+          lockManualPalette={lockManualPalette}
           onColorCountChange={handleColorCountChange}
-          onUseFilamentPaletteChange={setUseFilamentPalette}
+          onLockManualPaletteChange={setLockManualPalette}
           onPaletteChange={setPalette}
+          onColorMixEnabledChange={(enabled) => {
+            setColorMixEnabled(enabled);
+            setLockManualPalette(enabled || lockManualPalette);
+            setInsideMaterialIndex(0);
+          }}
+          onColorMixFilamentsChange={setColorMixFilaments}
           onInsideMaterialChange={setInsideMaterialIndex}
         />
         <ReliefControls settings={relief} onChange={setRelief} />
       </aside>
       <section className="work-area">
         <Preview3D mesh={mesh} />
-        <ExportPanel canExport={Boolean(mesh)} isExporting={isExporting} triangleCount={mesh?.triangles.length ?? 0} status={status} onExport={handleExport} />
+        <ExportPanel
+          canExport={Boolean(mesh || processedCanvas)}
+          isExporting={isExporting}
+          triangleCount={mesh?.triangles.length ?? 0}
+          status={status}
+          triangulateBeforeExport={triangulateBeforeExport}
+          onTriangulateBeforeExportChange={setTriangulateBeforeExport}
+          onExport={handleExport}
+        />
       </section>
     </main>
   );
