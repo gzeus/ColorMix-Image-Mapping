@@ -5,7 +5,6 @@ type LAB = { L: number; a: number; b: number };
 type FilamentPart = { hex: string; ratio: number };
 
 const DEFAULT_CMYWK = ['#009bc3', '#c9378c', '#f6b921', '#252e2e', '#e4e4e5'];
-const PAIR_RATIOS = [0.25, 0.5, 0.75];
 
 function srgbToLinear(c: number): number {
   const v = c / 255;
@@ -128,40 +127,17 @@ export function buildColorMixPalette(filaments: PaletteColor[]): PaletteColor[] 
   const materials: PaletteColor[] = filaments.map((filament, index) => ({ ...filament, name: filament.name || `Filament ${index + 1}`, components: [{ extruder: index + 1, ratio: 1 }] }));
   for (let i = 0; i < filaments.length; i += 1) {
     for (let j = i + 1; j < filaments.length; j += 1) {
-      PAIR_RATIOS.forEach((secondRatio) => {
-        const firstRatio = 1 - secondRatio;
-        const mix = mixFilaments([
-          { hex: filaments[i].hex, ratio: firstRatio },
-          { hex: filaments[j].hex, ratio: secondRatio },
-        ]);
-        materials.push({
-          ...makePaletteColor(mix.hex, materials.length, `${i + 1}:${j + 1} ${Math.round(firstRatio * 100)}/${Math.round(secondRatio * 100)}`),
-          components: [
-            { extruder: i + 1, ratio: firstRatio },
-            { extruder: j + 1, ratio: secondRatio },
-          ],
-        });
+      const mix = mixFilaments([
+        { hex: filaments[i].hex, ratio: 0.5 },
+        { hex: filaments[j].hex, ratio: 0.5 },
+      ]);
+      materials.push({
+        ...makePaletteColor(mix.hex, materials.length, `${i + 1}:${j + 1} 50/50`),
+        components: [
+          { extruder: i + 1, ratio: 0.5 },
+          { extruder: j + 1, ratio: 0.5 },
+        ],
       });
-    }
-  }
-  for (let i = 0; i < filaments.length; i += 1) {
-    for (let j = i + 1; j < filaments.length; j += 1) {
-      for (let k = j + 1; k < filaments.length; k += 1) {
-        [i, j, k].forEach((dominant) => {
-          const parts = [i, j, k].map((filamentIndex) => ({
-            hex: filaments[filamentIndex].hex,
-            ratio: filamentIndex === dominant ? 0.5 : 0.25,
-          }));
-          const mix = mixFilaments(parts);
-          materials.push({
-            ...makePaletteColor(mix.hex, materials.length, `${i + 1}:${j + 1}:${k + 1} ${dominant + 1} dominant`),
-            components: [i, j, k].map((filamentIndex) => ({
-              extruder: filamentIndex + 1,
-              ratio: filamentIndex === dominant ? 0.5 : 0.25,
-            })),
-          });
-        });
-      }
     }
   }
   const pure = materials.slice(0, filaments.length);

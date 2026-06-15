@@ -31,6 +31,7 @@ export function ShapeControls({ settings, onChange }: Props) {
         </>
       )}
       <label className="number-row"><span>Wall mm</span><input type="number" min="0" step="0.2" value={settings.wallThicknessMm} onChange={(e) => patch({ wallThicknessMm: Number(e.target.value) })} /></label>
+      <label className="number-row"><span>Bottom mm</span><input type="number" min="0.2" step="0.2" value={settings.bottomThicknessMm} onChange={(e) => patch({ bottomThicknessMm: Number(e.target.value) })} /></label>
       <div className="preset-row">
         {Object.entries(presets).map(([name, values]) => (
           <button type="button" key={name} onClick={() => patch(values)}>{name}</button>

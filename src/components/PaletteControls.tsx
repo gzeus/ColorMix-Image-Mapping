@@ -73,6 +73,7 @@ export function PaletteControls({
             ))}
           </div>
           <button type="button" onClick={addColorMixFilament} disabled={colorMixFilaments.length >= 8}>Add ColorMix filament</button>
+          <p className="helper-copy">PrusaSlicer sliced preview may show physical source filament paths; the generated swatches are predicted blend colors.</p>
           <div className="mix-grid">
             {colorMixPalette.map((color, index) => (
               <div className="mix-chip" key={`${color.id}-${index}`}>

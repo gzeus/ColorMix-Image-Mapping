@@ -267,6 +267,13 @@ header h1 {
   font-size: 13px;
 }
 
+.helper-copy {
+  margin: 0;
+  color: #61707c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .work-area {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;

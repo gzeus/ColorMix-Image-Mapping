@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { MeshData } from '../geometry/meshTypes';
+import { PRUSA_XL_VADER_CONFIG } from './prusaXlVaderConfig';
 
 const MODEL_CONTENT_TYPE = 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml';
 const START_PART_RELATIONSHIP = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel';
@@ -92,22 +93,34 @@ function relsXml(): string {
 function modelConfigXml(mesh: MeshData): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <config>
- <object id="2" instances_count="1">
+ <object id="1" instances_count="1">
   <metadata type="object" key="name" value="${escapeXml(mesh.name)}"/>
   <volume firstid="0" lastid="${Math.max(0, mesh.triangles.length - 1)}">
    <metadata type="volume" key="name" value="${escapeXml(mesh.name)}"/>
    <metadata type="volume" key="volume_type" value="ModelPart"/>
+   <metadata type="volume" key="source_file" value="${escapeXml(mesh.name)}.stl"/>
    <metadata type="volume" key="source_object_id" value="0"/>
    <metadata type="volume" key="source_volume_id" value="0"/>
+   <metadata type="volume" key="source_offset_x" value="0"/>
+   <metadata type="volume" key="source_offset_y" value="0"/>
+   <metadata type="volume" key="source_offset_z" value="0"/>
    <mesh edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
   </volume>
  </object>
 </config>`;
 }
 
+function getColorMixPhysicalCount(mesh: MeshData): number | null {
+  const hasVirtualRecipes = mesh.materials.some((material) => (material.components?.length ?? 0) > 1);
+  if (!hasVirtualRecipes) {
+    return null;
+  }
+  return Math.max(2, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
+}
+
 function prusaFullSpectrumJson(mesh: MeshData): string {
-  const maxComponentExtruder = Math.max(0, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
-  const physicalCount = Math.max(2, maxComponentExtruder || Math.min(2, mesh.materials.length));
+  const colorMixPhysicalCount = getColorMixPhysicalCount(mesh);
+  const physicalCount = colorMixPhysicalCount ?? mesh.materials.length;
   const physicalExtruders = mesh.materials.slice(0, physicalCount).map((material, index) => ({
     color: material.hex.toUpperCase(),
     id: index + 1,
@@ -117,17 +130,11 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
     physicalExtruders.push({ color: physicalExtruders[0].color, id: 2 });
   }
 
-  const virtualExtruders = mesh.materials.slice(physicalCount).map((material, offset) => {
+  const virtualExtruders = colorMixPhysicalCount === null ? [] : mesh.materials.slice(physicalCount).map((material, offset) => {
     const paletteIndex = offset + physicalCount;
-    const denominator = Math.max(1, mesh.materials.length - 1);
-    const highlightRatio = Math.round(((paletteIndex - 1) / denominator) * 10000) / 10000;
-    const shadowRatio = Math.round(((mesh.materials.length - paletteIndex) / denominator) * 10000) / 10000;
     return {
       color: material.hex.toUpperCase(),
-      components: material.components ?? [
-        { extruder: 1, ratio: highlightRatio },
-        { extruder: 2, ratio: shadowRatio },
-      ],
+      components: material.components ?? [{ extruder: 1, ratio: 1 }],
       id: paletteIndex + 1,
       kind: 'fullspectrum',
     };
@@ -141,37 +148,44 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
 }
 
 function prusaProjectConfig(mesh: MeshData): string {
-  const maxComponentExtruder = Math.max(0, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
-  const physicalCount = Math.max(2, maxComponentExtruder || Math.min(2, mesh.materials.length));
+  const colorMixPhysicalCount = getColorMixPhysicalCount(mesh);
+  const physicalCount = colorMixPhysicalCount ?? mesh.materials.length;
   const physicalColors = mesh.materials.slice(0, physicalCount).map((material) => material.hex.toUpperCase());
   if (physicalColors.length === 1) {
     physicalColors.push(physicalColors[0]);
   }
-  return `; extruder_colour = ${physicalColors.join(';')}\n`;
+  while (physicalColors.length < 5) {
+    physicalColors.push(physicalColors[physicalColors.length - 1] ?? '#FF8000');
+  }
+  const colorLine = physicalColors.join(';');
+  return PRUSA_XL_VADER_CONFIG
+    .replace(/^; extruder_colour = .*$/m, `; extruder_colour = ${colorLine}`)
+    .replace(/^; filament_colour = .*$/m, `; filament_colour = ${colorLine}`);
 }
 
 function modelXml(mesh: MeshData): string {
   const vertices = [];
   for (let i = 0; i < mesh.vertices.length; i += 3) {
-    vertices.push(`<vertex x="${mesh.vertices[i].toFixed(5)}" y="${mesh.vertices[i + 1].toFixed(5)}" z="${mesh.vertices[i + 2].toFixed(5)}" />`);
+    const x = mesh.vertices[i];
+    const y = -mesh.vertices[i + 2];
+    const z = mesh.vertices[i + 1];
+    vertices.push(`<vertex x="${x.toFixed(5)}" y="${y.toFixed(5)}" z="${z.toFixed(5)}" />`);
   }
   const triangles = mesh.triangles.map((triangle) => {
     const materialIndex = Math.max(0, Math.min(mesh.materials.length - 1, triangle.materialIndex));
     const prusaState = encodePrusaTriangleState(materialIndex + 1);
-    return `<triangle v1="${triangle.a}" v2="${triangle.b}" v3="${triangle.c}" pid="1" p1="${materialIndex}" p2="${materialIndex}" p3="${materialIndex}" slic3rpe:mmu_segmentation="${prusaState}" />`;
+    return `<triangle v1="${triangle.a}" v2="${triangle.b}" v3="${triangle.c}" slic3rpe:mmu_segmentation="${prusaState}" />`;
   }).join('');
-  const materials = mesh.materials
-    .map((material, index) => `<base name="${escapeXml(material.name || `Material ${index + 1}`)}" displaycolor="${material.hex.toUpperCase()}" />`)
-    .join('');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="${CORE_NAMESPACE}" xmlns:slic3rpe="${PRUSA_NAMESPACE}">
   <metadata name="slic3rpe:Version3mf">1</metadata>
   <metadata name="slic3rpe:MmPaintingVersion">1</metadata>
+  <metadata name="Title">${escapeXml(mesh.name)}</metadata>
+  <metadata name="Description">${escapeXml(mesh.name)}</metadata>
   <metadata name="Application">3D Image Mapper</metadata>
   <resources>
-    <basematerials id="1">${materials}</basematerials>
-    <object id="2" type="model" name="${escapeXml(mesh.name)}">
+    <object id="1" type="model" name="${escapeXml(mesh.name)}">
       <mesh>
         <vertices>${vertices.join('')}</vertices>
         <triangles>${triangles}</triangles>
@@ -179,7 +193,7 @@ function modelXml(mesh: MeshData): string {
     </object>
   </resources>
   <build>
-    <item objectid="2" />
+    <item objectid="1" printable="1" />
   </build>
 </model>`;
 }
@@ -192,7 +206,9 @@ export async function export3mf(mesh: MeshData, fileName: string): Promise<void>
   zip.file('3D/3dmodel.model', modelXml(repairedMesh));
   zip.file('Metadata/Slic3r_PE.config', prusaProjectConfig(repairedMesh));
   zip.file('Metadata/Slic3r_PE_model.config', modelConfigXml(repairedMesh));
-  zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(repairedMesh));
+  if (getColorMixPhysicalCount(repairedMesh) !== null) {
+    zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(repairedMesh));
+  }
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const url = URL.createObjectURL(new Blob([blob], { type: 'model/3mf' }));
   const anchor = document.createElement('a');

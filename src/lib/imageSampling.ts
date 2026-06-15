@@ -59,7 +59,7 @@ export function drawMappedImagePreview(source: HTMLCanvasElement | null, setting
   const sampler = makeImageSampler(source, settings);
   for (let y = 0; y < canvas.height; y += 1) {
     for (let x = 0; x < canvas.width; x += 1) {
-      const color = sampler(x / (canvas.width - 1), y / (canvas.height - 1));
+      const color = sampler(x / (canvas.width - 1), 1 - y / (canvas.height - 1));
       const offset = (y * canvas.width + x) * 4;
       imageData.data[offset] = color.r;
       imageData.data[offset + 1] = color.g;
@@ -81,7 +81,7 @@ export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSett
 
   return (u: number, v: number): Rgba => {
     let mappedU = settings.mirrorX ? 1 - u : u;
-    let mappedV = settings.flipY ? 1 - v : v;
+    let mappedV = settings.flipY ? v : 1 - v;
     mappedU = (mappedU - 0.5) / settings.scale + 0.5 + settings.offsetU;
     mappedV = (mappedV - 0.5) / settings.scale + 0.5 + settings.offsetV;
 

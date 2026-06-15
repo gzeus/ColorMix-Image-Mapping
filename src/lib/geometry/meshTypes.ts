@@ -22,6 +22,7 @@ export type ShapeSettings = {
   middleDiameterMm: number;
   topDiameterMm: number;
   wallThicknessMm: number;
+  bottomThicknessMm: number;
   radialSegments: number;
   heightSegments: number;
   openTop: boolean;

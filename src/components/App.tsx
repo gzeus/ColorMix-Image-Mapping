@@ -11,6 +11,7 @@ import { export3mf } from '../lib/export/export3mf';
 import { generateCylinder } from '../lib/geometry/generateCylinder';
 import { generateVase } from '../lib/geometry/generateVase';
 import type { ImageMappingSettings, MeshData, ReliefSettings, ShapeSettings } from '../lib/geometry/meshTypes';
+import { validateMeshManifold, type MeshValidationResult } from '../lib/geometry/validateMesh';
 import { createProcessedCanvas, drawMappedImagePreview, fileToCanvas, makeImageSampler } from '../lib/imageSampling';
 import { quantizeCanvas } from '../lib/quantization';
 
@@ -23,6 +24,7 @@ const defaultShape: ShapeSettings = {
   middleDiameterMm: 82,
   topDiameterMm: 48,
   wallThicknessMm: 1.2,
+  bottomThicknessMm: 1.2,
   radialSegments: 128,
   heightSegments: 128,
   openTop: true,
@@ -45,6 +47,7 @@ export default function App() {
   const [colorMixFilaments, setColorMixFilaments] = useState<PaletteColor[]>(defaultColorMixFilaments());
   const [insideMaterialIndex, setInsideMaterialIndex] = useState(1);
   const [mesh, setMesh] = useState<MeshData | null>(null);
+  const [meshValidation, setMeshValidation] = useState<MeshValidationResult | null>(null);
   const [status, setStatus] = useState('Ready for an image.');
   const [isExporting, setIsExporting] = useState(false);
   const [triangulateBeforeExport, setTriangulateBeforeExport] = useState(false);
@@ -108,6 +111,7 @@ export default function App() {
     const timer = window.setTimeout(() => {
       const nextMesh = buildMesh('preview');
       setMesh(nextMesh);
+      setMeshValidation(nextMesh ? validateMeshManifold(nextMesh) : null);
       setStatus(nextMesh ? 'Preview ready. 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.' : 'Upload an image to generate the preview.');
     }, 220);
     return () => window.clearTimeout(timer);
@@ -121,6 +125,7 @@ export default function App() {
       setImageUrl(URL.createObjectURL(file));
       setImageCanvas(canvas);
       setMesh(null);
+      setMeshValidation(null);
       setStatus('Image loaded. Generating preview...');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Image failed to load.');
@@ -134,10 +139,13 @@ export default function App() {
       return;
     }
     setIsExporting(true);
+    const exportValidation = validateMeshManifold(exportMesh);
     setStatus('Exporting 3MF...');
     try {
       await export3mf(exportMesh, exportMesh.name);
-      setStatus('Exported 3MF with face material colors and Prusa metadata.');
+      setStatus(exportValidation.boundaryEdges || exportValidation.nonManifoldEdges
+        ? `Exported 3MF, but validation found ${exportValidation.boundaryEdges} boundary and ${exportValidation.nonManifoldEdges} non-manifold edges.`
+        : 'Exported 3MF with face material colors and Prusa metadata.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '3MF export failed.');
     } finally {
@@ -154,6 +162,10 @@ export default function App() {
     }
     setInsideMaterialIndex((current) => Math.min(current, count - 1));
   };
+
+  const validationWarning = meshValidation && (meshValidation.boundaryEdges || meshValidation.nonManifoldEdges || meshValidation.duplicateTriangles)
+    ? `${meshValidation.boundaryEdges} boundary edges, ${meshValidation.nonManifoldEdges} non-manifold edges, ${meshValidation.duplicateTriangles} duplicate triangles.`
+    : null;
 
   return (
     <main className="app-shell">
@@ -197,6 +209,7 @@ export default function App() {
           isExporting={isExporting}
           triangleCount={mesh?.triangles.length ?? 0}
           status={status}
+          validationWarning={validationWarning}
           triangulateBeforeExport={triangulateBeforeExport}
           onTriangulateBeforeExportChange={setTriangulateBeforeExport}
           onExport={handleExport}
