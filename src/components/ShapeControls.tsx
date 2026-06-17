@@ -21,6 +21,10 @@ function arcRadiusFor(heightMm: number, aspectRatio: number, arcAngleDeg: number
   return Math.max(5, (heightMm * aspectRatio) / angle);
 }
 
+function diameterFor(heightMm: number, aspectRatio: number): number {
+  return Math.max(5, (heightMm * aspectRatio) / Math.PI);
+}
+
 export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
   const aspectRatio = imageAspectRatio && imageAspectRatio > 0 ? imageAspectRatio : settings.widthMm / Math.max(1, settings.heightMm);
   const patch = (partial: Partial<ShapeSettings>) => onChange({ ...settings, ...partial });
@@ -39,7 +43,18 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
       patch({ heightMm });
       return;
     }
-    if (settings.type === 'plane') {
+    if (settings.type === 'cylinder') {
+      patch({ heightMm, diameterMm: diameterFor(heightMm, aspectRatio) });
+    } else if (settings.type === 'vase') {
+      const nextMiddle = diameterFor(heightMm, aspectRatio);
+      const scale = nextMiddle / Math.max(0.001, settings.middleDiameterMm);
+      patch({
+        heightMm,
+        bottomDiameterMm: settings.bottomDiameterMm * scale,
+        middleDiameterMm: nextMiddle,
+        topDiameterMm: settings.topDiameterMm * scale,
+      });
+    } else if (settings.type === 'plane') {
       patch({ heightMm, widthMm: heightMm * aspectRatio });
     } else if (settings.type === 'arc') {
       patch({ heightMm, diameterMm: arcRadiusFor(heightMm, aspectRatio, settings.arcAngleDeg) * 2 });
@@ -49,6 +64,23 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
   };
   const updatePlaneWidth = (widthMm: number) => {
     patch(settings.scaleLocked ? { widthMm, heightMm: widthMm / aspectRatio } : { widthMm });
+  };
+  const updateCylinderDiameter = (diameterMm: number) => {
+    patch(settings.scaleLocked ? { diameterMm, heightMm: (diameterMm * Math.PI) / aspectRatio } : { diameterMm });
+  };
+  const updateVaseDiameter = (field: 'bottomDiameterMm' | 'middleDiameterMm' | 'topDiameterMm', diameterMm: number) => {
+    if (!settings.scaleLocked) {
+      patch({ [field]: diameterMm });
+      return;
+    }
+    const scale = diameterMm / Math.max(0.001, settings[field]);
+    const nextMiddle = field === 'middleDiameterMm' ? diameterMm : settings.middleDiameterMm * scale;
+    patch({
+      bottomDiameterMm: field === 'bottomDiameterMm' ? diameterMm : settings.bottomDiameterMm * scale,
+      middleDiameterMm: nextMiddle,
+      topDiameterMm: field === 'topDiameterMm' ? diameterMm : settings.topDiameterMm * scale,
+      heightMm: (nextMiddle * Math.PI) / aspectRatio,
+    });
   };
   const updateArcRadius = (radiusMm: number) => {
     const angle = Math.max(5, Math.min(330, settings.arcAngleDeg)) * (Math.PI / 180);
@@ -60,6 +92,17 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
   const updateScaleLocked = (scaleLocked: boolean) => {
     if (!scaleLocked) {
       patch({ scaleLocked });
+    } else if (settings.type === 'cylinder') {
+      patch({ scaleLocked, diameterMm: diameterFor(settings.heightMm, aspectRatio) });
+    } else if (settings.type === 'vase') {
+      const nextMiddle = diameterFor(settings.heightMm, aspectRatio);
+      const scale = nextMiddle / Math.max(0.001, settings.middleDiameterMm);
+      patch({
+        scaleLocked,
+        bottomDiameterMm: settings.bottomDiameterMm * scale,
+        middleDiameterMm: nextMiddle,
+        topDiameterMm: settings.topDiameterMm * scale,
+      });
     } else if (settings.type === 'plane') {
       patch({ scaleLocked, widthMm: settings.heightMm * aspectRatio });
     } else if (settings.type === 'arc') {
@@ -80,12 +123,12 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
       </div>
       <label className="number-row"><span>Height mm</span><input type="number" min="5" value={settings.heightMm} onChange={(e) => updatePanelHeight(clampNumber(Number(e.target.value), settings.heightMm))} /></label>
       {settings.type === 'cylinder' ? (
-        <label className="number-row"><span>Diameter mm</span><input type="number" min="5" value={settings.diameterMm} onChange={(e) => patch({ diameterMm: Number(e.target.value) })} /></label>
+        <label className="number-row"><span>Diameter mm</span><input type="number" min="5" value={settings.diameterMm} onChange={(e) => updateCylinderDiameter(clampNumber(Number(e.target.value), settings.diameterMm))} /></label>
       ) : settings.type === 'vase' ? (
         <>
-          <label className="number-row"><span>Bottom mm</span><input type="number" min="5" value={settings.bottomDiameterMm} onChange={(e) => patch({ bottomDiameterMm: Number(e.target.value) })} /></label>
-          <label className="number-row"><span>Belly mm</span><input type="number" min="5" value={settings.middleDiameterMm} onChange={(e) => patch({ middleDiameterMm: Number(e.target.value) })} /></label>
-          <label className="number-row"><span>Top mm</span><input type="number" min="5" value={settings.topDiameterMm} onChange={(e) => patch({ topDiameterMm: Number(e.target.value) })} /></label>
+          <label className="number-row"><span>Bottom mm</span><input type="number" min="5" value={settings.bottomDiameterMm} onChange={(e) => updateVaseDiameter('bottomDiameterMm', clampNumber(Number(e.target.value), settings.bottomDiameterMm))} /></label>
+          <label className="number-row"><span>Belly mm</span><input type="number" min="5" value={settings.middleDiameterMm} onChange={(e) => updateVaseDiameter('middleDiameterMm', clampNumber(Number(e.target.value), settings.middleDiameterMm))} /></label>
+          <label className="number-row"><span>Top mm</span><input type="number" min="5" value={settings.topDiameterMm} onChange={(e) => updateVaseDiameter('topDiameterMm', clampNumber(Number(e.target.value), settings.topDiameterMm))} /></label>
         </>
       ) : settings.type === 'arc' ? (
         <>
@@ -95,9 +138,7 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
       ) : (
         <label className="number-row"><span>Width mm</span><input type="number" min="5" value={settings.widthMm} onChange={(e) => updatePlaneWidth(clampNumber(Number(e.target.value), settings.widthMm))} /></label>
       )}
-      {settings.type === 'plane' || settings.type === 'arc' ? (
-        <label className="check-row"><input type="checkbox" checked={settings.scaleLocked} onChange={(e) => updateScaleLocked(e.target.checked)} /> Scaling lock</label>
-      ) : null}
+      <label className="check-row"><input type="checkbox" checked={settings.scaleLocked} onChange={(e) => updateScaleLocked(e.target.checked)} /> Scaling lock</label>
       <label className="number-row"><span>Wall mm</span><input type="number" min="0" step="0.2" value={settings.wallThicknessMm} onChange={(e) => patch({ wallThicknessMm: Number(e.target.value) })} /></label>
       {settings.type === 'cylinder' || settings.type === 'vase' ? (
         <label className="number-row"><span>Bottom mm</span><input type="number" min="0.2" step="0.2" value={settings.bottomThicknessMm} onChange={(e) => patch({ bottomThicknessMm: Number(e.target.value) })} /></label>

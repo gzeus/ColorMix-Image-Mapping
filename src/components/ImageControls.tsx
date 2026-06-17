@@ -2,14 +2,13 @@ import type { ChangeEvent } from 'react';
 import type { ImageMappingSettings } from '../lib/geometry/meshTypes';
 
 type Props = {
-  imageUrl: string | null;
   mapping: ImageMappingSettings;
   mappedPreviewUrl: string | null;
   onImageChange: (file: File) => void;
   onMappingChange: (settings: ImageMappingSettings) => void;
 };
 
-export function ImageControls({ imageUrl, mapping, mappedPreviewUrl, onImageChange, onMappingChange }: Props) {
+export function ImageControls({ mapping, mappedPreviewUrl, onImageChange, onMappingChange }: Props) {
   const patch = (partial: Partial<ImageMappingSettings>) => onMappingChange({ ...mapping, ...partial });
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -29,7 +28,6 @@ export function ImageControls({ imageUrl, mapping, mappedPreviewUrl, onImageChan
         </label>
       </div>
       <div className="image-strip">
-        {imageUrl ? <img src={imageUrl} alt="Uploaded source" /> : <div className="empty-preview">No image</div>}
         {mappedPreviewUrl ? <img src={mappedPreviewUrl} alt="Mapped preview" /> : <div className="empty-preview">Mapping</div>}
       </div>
       <label className="field">

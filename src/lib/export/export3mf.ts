@@ -6,6 +6,9 @@ const MODEL_CONTENT_TYPE = 'application/vnd.ms-package.3dmanufacturing-3dmodel+x
 const START_PART_RELATIONSHIP = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel';
 const CORE_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 const PRUSA_NAMESPACE = 'http://schemas.slic3r.org/3mf/2017/06';
+const BED_CENTER_X_MM = 180;
+const BED_CENTER_Y_MM = 180;
+const PRUSAMENT_PLA_PROFILE = 'Prusament PLA';
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -101,8 +104,8 @@ function modelConfigXml(mesh: MeshData): string {
    <metadata type="volume" key="source_file" value="${escapeXml(mesh.name)}.stl"/>
    <metadata type="volume" key="source_object_id" value="0"/>
    <metadata type="volume" key="source_volume_id" value="0"/>
-   <metadata type="volume" key="source_offset_x" value="0"/>
-   <metadata type="volume" key="source_offset_y" value="0"/>
+   <metadata type="volume" key="source_offset_x" value="${BED_CENTER_X_MM.toFixed(5)}"/>
+   <metadata type="volume" key="source_offset_y" value="${BED_CENTER_Y_MM.toFixed(5)}"/>
    <metadata type="volume" key="source_offset_z" value="0"/>
    <mesh edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
   </volume>
@@ -123,11 +126,15 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
   const physicalCount = colorMixPhysicalCount ?? mesh.materials.length;
   const physicalExtruders = mesh.materials.slice(0, physicalCount).map((material, index) => ({
     color: material.hex.toUpperCase(),
+    filament_settings_id: PRUSAMENT_PLA_PROFILE,
     id: index + 1,
+    name: PRUSAMENT_PLA_PROFILE,
+    type: 'PLA',
+    vendor: 'Prusa Polymers',
   }));
 
   if (physicalExtruders.length === 1) {
-    physicalExtruders.push({ color: physicalExtruders[0].color, id: 2 });
+    physicalExtruders.push({ ...physicalExtruders[0], id: 2 });
   }
 
   const virtualExtruders = colorMixPhysicalCount === null ? [] : mesh.materials.slice(physicalCount).map((material, offset) => {
@@ -158,9 +165,14 @@ function prusaProjectConfig(mesh: MeshData): string {
     physicalColors.push(physicalColors[physicalColors.length - 1] ?? '#FF8000');
   }
   const colorLine = physicalColors.join(';');
+  const repeatedPrusamentPla = Array.from({ length: Math.max(5, physicalCount) }, () => `"${PRUSAMENT_PLA_PROFILE}"`).join(';');
+  const repeatedPlaTypes = Array.from({ length: Math.max(5, physicalCount) }, () => 'PLA').join(';');
   return PRUSA_XL_VADER_CONFIG
+    .replace(/^; default_filament_profile = .*$/m, `; default_filament_profile = "${PRUSAMENT_PLA_PROFILE}"`)
     .replace(/^; extruder_colour = .*$/m, `; extruder_colour = ${colorLine}`)
-    .replace(/^; filament_colour = .*$/m, `; filament_colour = ${colorLine}`);
+    .replace(/^; filament_colour = .*$/m, `; filament_colour = ${colorLine}`)
+    .replace(/^; filament_settings_id = .*$/m, `; filament_settings_id = ${repeatedPrusamentPla}`)
+    .replace(/^; filament_type = .*$/m, `; filament_type = ${repeatedPlaTypes}`);
 }
 
 function modelXml(mesh: MeshData): string {
@@ -193,7 +205,7 @@ function modelXml(mesh: MeshData): string {
     </object>
   </resources>
   <build>
-    <item objectid="1" printable="1" />
+    <item objectid="1" printable="1" transform="1 0 0 0 1 0 0 0 1 ${BED_CENTER_X_MM.toFixed(5)} ${BED_CENTER_Y_MM.toFixed(5)} 0" />
   </build>
 </model>`;
 }
@@ -213,7 +225,7 @@ export async function export3mf(mesh: MeshData, fileName: string): Promise<void>
   const url = URL.createObjectURL(new Blob([blob], { type: 'model/3mf' }));
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = fileName.endsWith('.3mf') ? fileName : `${fileName}.3mf`;
+  anchor.download = fileName.toLowerCase().endsWith('.3mf') ? fileName : `${fileName}.3MF`;
   anchor.click();
   URL.revokeObjectURL(url);
 }

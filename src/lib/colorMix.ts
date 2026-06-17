@@ -4,7 +4,7 @@ type RGB = { r: number; g: number; b: number };
 type LAB = { L: number; a: number; b: number };
 type FilamentPart = { hex: string; ratio: number };
 
-const DEFAULT_CMYWK = ['#009bc3', '#c9378c', '#f6b921', '#252e2e', '#e4e4e5'];
+const DEFAULT_CMYWK = ['#009bc3', '#c9378c', '#f6b921', '#252e2e', '#ffffff'];
 
 function srgbToLinear(c: number): number {
   const v = c / 255;

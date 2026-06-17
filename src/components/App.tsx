@@ -26,8 +26,8 @@ const defaultShape: ShapeSettings = {
   bottomDiameterMm: 54,
   middleDiameterMm: 82,
   topDiameterMm: 48,
-  wallThicknessMm: 1.2,
-  bottomThicknessMm: 1.2,
+  wallThicknessMm: 2,
+  bottomThicknessMm: 2,
   radialSegments: 128,
   heightSegments: 128,
   openTop: true,
@@ -74,9 +74,18 @@ function fitPanelShapeToImage(shape: ShapeSettings, canvas: HTMLCanvasElement): 
   return shape;
 }
 
+function fileTitleFromName(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/, '').trim() || 'image';
+}
+
+function safeFileNamePart(value: string): string {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/\s+/g, ' ').trim() || 'image';
+}
+
 export default function App() {
   const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageTitle, setImageTitle] = useState('image');
   const [mappedPreviewUrl, setMappedPreviewUrl] = useState<string | null>(null);
   const [mapping, setMapping] = useState(defaultMapping);
   const [shape, setShape] = useState(defaultShape);
@@ -251,6 +260,7 @@ export default function App() {
       const canvas = await fileToCanvas(file);
       if (imageUrl) URL.revokeObjectURL(imageUrl);
       setImageUrl(URL.createObjectURL(file));
+      setImageTitle(fileTitleFromName(file.name));
       setImageCanvas(canvas);
       setShape((current) => fitPanelShapeToImage(current, canvas));
       setMesh(null);
@@ -290,9 +300,11 @@ export default function App() {
     }
     setIsExporting(true);
     const exportValidation = validateMeshManifold(exportMesh);
+    const exportName = `${safeFileNamePart(imageTitle)}_${shape.type}`;
+    const namedExportMesh: MeshData = { ...exportMesh, name: exportName };
     setStatus('Exporting 3MF...');
     try {
-      await export3mf(exportMesh, exportMesh.name);
+      await export3mf(namedExportMesh, `${exportName}.3MF`);
       setStatus(exportValidation.boundaryEdges || exportValidation.nonManifoldEdges
         ? `Exported 3MF, but validation found ${exportValidation.boundaryEdges} boundary and ${exportValidation.nonManifoldEdges} non-manifold edges.`
         : 'Exported 3MF with face material colors and Prusa metadata.');
@@ -330,7 +342,7 @@ export default function App() {
             </button>
           </div>
         </header>
-        <ImageControls imageUrl={imageUrl} mapping={mapping} mappedPreviewUrl={mappedPreviewUrl} onImageChange={loadImage} onMappingChange={commitMapping} />
+        <ImageControls mapping={mapping} mappedPreviewUrl={mappedPreviewUrl} onImageChange={loadImage} onMappingChange={commitMapping} />
         <ShapeControls settings={shape} imageAspectRatio={imageAspectRatio} onChange={commitShape} />
         <PaletteControls
           colorCount={colorCount}
