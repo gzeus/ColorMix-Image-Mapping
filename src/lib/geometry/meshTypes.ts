@@ -1,7 +1,7 @@
 import type { PaletteColor, Rgba } from '../colorUtils';
 
 export type FitMode = 'stretch' | 'contain' | 'cover';
-export type ShapeKind = 'cylinder' | 'vase';
+export type ShapeKind = 'cylinder' | 'vase' | 'plane' | 'arc';
 
 export type ImageMappingSettings = {
   fitMode: FitMode;
@@ -17,7 +17,9 @@ export type ImageMappingSettings = {
 export type ShapeSettings = {
   type: ShapeKind;
   heightMm: number;
+  widthMm: number;
   diameterMm: number;
+  arcAngleDeg: number;
   bottomDiameterMm: number;
   middleDiameterMm: number;
   topDiameterMm: number;
@@ -27,6 +29,7 @@ export type ShapeSettings = {
   heightSegments: number;
   openTop: boolean;
   addBottom: boolean;
+  scaleLocked: boolean;
 };
 
 export type ReliefSettings = {

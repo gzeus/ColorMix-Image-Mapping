@@ -125,7 +125,7 @@ export function buildLatheMesh(
     for (let x = 0; x < radial; x += 1) {
       const nx = (x + 1) % radial;
       addQuad(triangles, inner[innerSegments][nx], inner[innerSegments][x], innerLipTop[x], innerLipTop[nx], safeInsideMaterialIndex);
-      addQuad(triangles, outer[outerTop][x], innerLipTop[x], innerLipTop[nx], outer[outerTop][nx], safeInsideMaterialIndex);
+      addQuad(triangles, outer[outerTop][nx], innerLipTop[nx], innerLipTop[x], outer[outerTop][x], safeInsideMaterialIndex);
     }
   } else if (!settings.openTop) {
     const y = heightSegments;
