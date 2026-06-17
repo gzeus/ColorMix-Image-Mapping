@@ -8,7 +8,9 @@ const CORE_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/0
 const PRUSA_NAMESPACE = 'http://schemas.slic3r.org/3mf/2017/06';
 const BED_CENTER_X_MM = 180;
 const BED_CENTER_Y_MM = 180;
-const PRUSAMENT_PLA_PROFILE = 'Prusament PLA';
+const PHYSICAL_EXTRUDER_COUNT = 5;
+const PRUSAMENT_PLA_PROFILE = 'Prusament PLA @XLIS';
+const THUMBNAIL_PATH = 'Metadata/Thumbnail.png';
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -81,6 +83,7 @@ function contentTypesXml(): string {
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
   <Default Extension="model" ContentType="${MODEL_CONTENT_TYPE}" />
+  <Default Extension="png" ContentType="image/png" />
   <Default Extension="json" ContentType="application/json" />
   <Default Extension="config" ContentType="application/octet-stream" />
 </Types>`;
@@ -90,27 +93,8 @@ function relsXml(): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="${START_PART_RELATIONSHIP}" />
+  <Relationship Target="/${THUMBNAIL_PATH}" Id="rel1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail" />
 </Relationships>`;
-}
-
-function modelConfigXml(mesh: MeshData): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<config>
- <object id="1" instances_count="1">
-  <metadata type="object" key="name" value="${escapeXml(mesh.name)}"/>
-  <volume firstid="0" lastid="${Math.max(0, mesh.triangles.length - 1)}">
-   <metadata type="volume" key="name" value="${escapeXml(mesh.name)}"/>
-   <metadata type="volume" key="volume_type" value="ModelPart"/>
-   <metadata type="volume" key="source_file" value="${escapeXml(mesh.name)}.stl"/>
-   <metadata type="volume" key="source_object_id" value="0"/>
-   <metadata type="volume" key="source_volume_id" value="0"/>
-   <metadata type="volume" key="source_offset_x" value="${BED_CENTER_X_MM.toFixed(5)}"/>
-   <metadata type="volume" key="source_offset_y" value="${BED_CENTER_Y_MM.toFixed(5)}"/>
-   <metadata type="volume" key="source_offset_z" value="0"/>
-   <mesh edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
-  </volume>
- </object>
-</config>`;
 }
 
 function getColorMixPhysicalCount(mesh: MeshData): number | null {
@@ -118,24 +102,16 @@ function getColorMixPhysicalCount(mesh: MeshData): number | null {
   if (!hasVirtualRecipes) {
     return null;
   }
-  return Math.max(2, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
+  return PHYSICAL_EXTRUDER_COUNT;
 }
 
 function prusaFullSpectrumJson(mesh: MeshData): string {
   const colorMixPhysicalCount = getColorMixPhysicalCount(mesh);
-  const physicalCount = colorMixPhysicalCount ?? mesh.materials.length;
-  const physicalExtruders = mesh.materials.slice(0, physicalCount).map((material, index) => ({
-    color: material.hex.toUpperCase(),
-    filament_settings_id: PRUSAMENT_PLA_PROFILE,
+  const physicalCount = colorMixPhysicalCount ?? PHYSICAL_EXTRUDER_COUNT;
+  const physicalExtruders = Array.from({ length: PHYSICAL_EXTRUDER_COUNT }, (_, index) => ({
+    color: (mesh.materials[index]?.hex ?? mesh.materials[mesh.materials.length - 1]?.hex ?? '#FF8000').toUpperCase(),
     id: index + 1,
-    name: PRUSAMENT_PLA_PROFILE,
-    type: 'PLA',
-    vendor: 'Prusa Polymers',
   }));
-
-  if (physicalExtruders.length === 1) {
-    physicalExtruders.push({ ...physicalExtruders[0], id: 2 });
-  }
 
   const virtualExtruders = colorMixPhysicalCount === null ? [] : mesh.materials.slice(physicalCount).map((material, offset) => {
     const paletteIndex = offset + physicalCount;
@@ -152,27 +128,6 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
     version: 1,
     virtual_extruders: virtualExtruders,
   }, null, 4);
-}
-
-function prusaProjectConfig(mesh: MeshData): string {
-  const colorMixPhysicalCount = getColorMixPhysicalCount(mesh);
-  const physicalCount = colorMixPhysicalCount ?? mesh.materials.length;
-  const physicalColors = mesh.materials.slice(0, physicalCount).map((material) => material.hex.toUpperCase());
-  if (physicalColors.length === 1) {
-    physicalColors.push(physicalColors[0]);
-  }
-  while (physicalColors.length < 5) {
-    physicalColors.push(physicalColors[physicalColors.length - 1] ?? '#FF8000');
-  }
-  const colorLine = physicalColors.join(';');
-  const repeatedPrusamentPla = Array.from({ length: Math.max(5, physicalCount) }, () => `"${PRUSAMENT_PLA_PROFILE}"`).join(';');
-  const repeatedPlaTypes = Array.from({ length: Math.max(5, physicalCount) }, () => 'PLA').join(';');
-  return PRUSA_XL_VADER_CONFIG
-    .replace(/^; default_filament_profile = .*$/m, `; default_filament_profile = "${PRUSAMENT_PLA_PROFILE}"`)
-    .replace(/^; extruder_colour = .*$/m, `; extruder_colour = ${colorLine}`)
-    .replace(/^; filament_colour = .*$/m, `; filament_colour = ${colorLine}`)
-    .replace(/^; filament_settings_id = .*$/m, `; filament_settings_id = ${repeatedPrusamentPla}`)
-    .replace(/^; filament_type = .*$/m, `; filament_type = ${repeatedPlaTypes}`);
 }
 
 function modelXml(mesh: MeshData): string {
@@ -210,14 +165,96 @@ function modelXml(mesh: MeshData): string {
 </model>`;
 }
 
+type ProjectedTriangle = {
+  points: [number, number][];
+  depth: number;
+  color: string;
+};
+
+function projectIso(x: number, y: number, z: number): [number, number, number] {
+  const angle = Math.PI / 6;
+  const px = (x - z) * Math.cos(angle);
+  const py = y + (x + z) * Math.sin(angle);
+  const depth = x + z - y * 0.15;
+  return [px, py, depth];
+}
+
+function createThumbnailBlob(mesh: MeshData): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 480;
+  canvas.height = 240;
+  const context = canvas.getContext('2d');
+  if (!context || mesh.triangles.length === 0) {
+    return Promise.resolve(new Blob());
+  }
+
+  context.fillStyle = '#f3f5f7';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const stride = Math.max(1, Math.ceil(mesh.triangles.length / 8000));
+  const projected: ProjectedTriangle[] = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (let index = 0; index < mesh.triangles.length; index += stride) {
+    const triangle = mesh.triangles[index];
+    const vertexIndexes = [triangle.a, triangle.b, triangle.c];
+    const points = vertexIndexes.map((vertexIndex) => {
+      const offset = vertexIndex * 3;
+      const [x, y, depth] = projectIso(mesh.vertices[offset], mesh.vertices[offset + 1], mesh.vertices[offset + 2]);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      return { x, y, depth };
+    });
+    projected.push({
+      color: mesh.materials[Math.max(0, Math.min(mesh.materials.length - 1, triangle.materialIndex))]?.hex ?? '#cccccc',
+      depth: points.reduce((sum, point) => sum + point.depth, 0) / points.length,
+      points: points.map((point) => [point.x, point.y]),
+    });
+  }
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const scale = Math.min((canvas.width - 52) / width, (canvas.height - 44) / height);
+  const offsetX = (canvas.width - width * scale) / 2 - minX * scale;
+  const offsetY = (canvas.height + height * scale) / 2 + minY * scale;
+
+  projected.sort((left, right) => left.depth - right.depth);
+  projected.forEach((triangle) => {
+    context.beginPath();
+    triangle.points.forEach(([x, y], pointIndex) => {
+      const px = x * scale + offsetX;
+      const py = offsetY - y * scale;
+      if (pointIndex === 0) {
+        context.moveTo(px, py);
+      } else {
+        context.lineTo(px, py);
+      }
+    });
+    context.closePath();
+    context.fillStyle = triangle.color;
+    context.globalAlpha = 0.96;
+    context.fill();
+  });
+  context.globalAlpha = 1;
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob ?? new Blob()), 'image/png');
+  });
+}
+
 export async function export3mf(mesh: MeshData, fileName: string): Promise<void> {
   const repairedMesh = repairMeshForExport(mesh);
+  const thumbnailBlob = await createThumbnailBlob(repairedMesh);
   const zip = new JSZip();
   zip.file('[Content_Types].xml', contentTypesXml());
   zip.file('_rels/.rels', relsXml());
   zip.file('3D/3dmodel.model', modelXml(repairedMesh));
-  zip.file('Metadata/Slic3r_PE.config', prusaProjectConfig(repairedMesh));
-  zip.file('Metadata/Slic3r_PE_model.config', modelConfigXml(repairedMesh));
+  zip.file(THUMBNAIL_PATH, thumbnailBlob);
   if (getColorMixPhysicalCount(repairedMesh) !== null) {
     zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(repairedMesh));
   }
