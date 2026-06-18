@@ -74,6 +74,11 @@ function fitPanelShapeToImage(shape: ShapeSettings, canvas: HTMLCanvasElement): 
   return shape;
 }
 
+function defaultShapeForImage(type: ShapeSettings['type'], canvas: HTMLCanvasElement | null): ShapeSettings {
+  const nextShape = { ...defaultShape, type };
+  return canvas ? fitPanelShapeToImage(nextShape, canvas) : nextShape;
+}
+
 function fileTitleFromName(fileName: string): string {
   return fileName.replace(/\.[^.]+$/, '').trim() || 'image';
 }
@@ -316,6 +321,23 @@ export default function App() {
     }
   };
 
+  const handleResetSettings = useCallback(() => {
+    pushUndo();
+    setMapping(defaultMapping);
+    setShape(defaultShapeForImage(shape.type, imageCanvas));
+    setRelief(defaultRelief);
+    setColorCount(4);
+    setLockManualPalette(false);
+    setPalette(fallbackPalette);
+    setColorMixEnabled(false);
+    setColorMixFilaments(defaultColorMixFilaments());
+    setInsideMaterialIndex(1);
+    setTriangulateBeforeExport(false);
+    setMesh(null);
+    setMeshValidation(null);
+    setStatus(imageCanvas ? 'Settings reset. Generating preview...' : 'Settings reset. Ready for an image.');
+  }, [imageCanvas, pushUndo, shape.type]);
+
   const handleColorCountChange = (count: number) => {
     pushUndo();
     setColorCount(count);
@@ -338,6 +360,9 @@ export default function App() {
           <p className="eyebrow">Client-side 3MF generator</p>
           <h1>ColorMix Image Mapper</h1>
           <div className="header-actions">
+            <button type="button" onClick={handleResetSettings}>
+              Reset settings
+            </button>
             <button type="button" className="primary-button" onClick={handleExport} disabled={isExporting || (!mesh && !processedCanvas)}>
               {isExporting ? 'Exporting...' : 'Export 3MF'}
             </button>

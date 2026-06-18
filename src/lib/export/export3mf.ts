@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import type { MeshData } from '../geometry/meshTypes';
-import { PRUSA_XL_VADER_CONFIG } from './prusaXlVaderConfig';
 
 const MODEL_CONTENT_TYPE = 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml';
 const START_PART_RELATIONSHIP = 'http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel';
@@ -8,8 +7,6 @@ const CORE_NAMESPACE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/0
 const PRUSA_NAMESPACE = 'http://schemas.slic3r.org/3mf/2017/06';
 const BED_CENTER_X_MM = 180;
 const BED_CENTER_Y_MM = 180;
-const PHYSICAL_EXTRUDER_COUNT = 5;
-const PRUSAMENT_PLA_PROFILE = 'Prusament PLA @XLIS';
 const THUMBNAIL_PATH = 'Metadata/Thumbnail.png';
 
 function escapeXml(value: string): string {
@@ -102,13 +99,35 @@ function getColorMixPhysicalCount(mesh: MeshData): number | null {
   if (!hasVirtualRecipes) {
     return null;
   }
-  return PHYSICAL_EXTRUDER_COUNT;
+  return Math.max(2, ...mesh.materials.flatMap((material) => material.components?.map((component) => component.extruder) ?? []));
+}
+
+function getMaxUsedMaterialCount(mesh: MeshData): number {
+  return Math.max(1, ...mesh.triangles.map((triangle) => triangle.materialIndex + 1));
+}
+
+function parseHexColor(hex: string): [number, number, number] {
+  const normalized = hex.replace('#', '').trim();
+  const fullHex = normalized.length === 3
+    ? normalized.split('').map((character) => `${character}${character}`).join('')
+    : normalized.padEnd(6, '0').slice(0, 6);
+  return [
+    Number.parseInt(fullHex.slice(0, 2), 16) || 0,
+    Number.parseInt(fullHex.slice(2, 4), 16) || 0,
+    Number.parseInt(fullHex.slice(4, 6), 16) || 0,
+  ];
+}
+
+function averageHexColor(left: string, right: string): string {
+  const leftRgb = parseHexColor(left);
+  const rightRgb = parseHexColor(right);
+  return `#${leftRgb.map((channel, index) => Math.round((channel + rightRgb[index]) / 2).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
 
 function prusaFullSpectrumJson(mesh: MeshData): string {
   const colorMixPhysicalCount = getColorMixPhysicalCount(mesh);
-  const physicalCount = colorMixPhysicalCount ?? PHYSICAL_EXTRUDER_COUNT;
-  const physicalExtruders = Array.from({ length: PHYSICAL_EXTRUDER_COUNT }, (_, index) => ({
+  const physicalCount = colorMixPhysicalCount ?? Math.max(2, getMaxUsedMaterialCount(mesh));
+  const physicalExtruders = Array.from({ length: physicalCount }, (_, index) => ({
     color: (mesh.materials[index]?.hex ?? mesh.materials[mesh.materials.length - 1]?.hex ?? '#FF8000').toUpperCase(),
     id: index + 1,
   }));
@@ -121,6 +140,15 @@ function prusaFullSpectrumJson(mesh: MeshData): string {
       id: paletteIndex + 1,
       kind: 'fullspectrum',
     };
+  });
+  virtualExtruders.push({
+    color: averageHexColor(physicalExtruders[0].color, physicalExtruders[1].color),
+    components: [
+      { extruder: 1, ratio: 0.5 },
+      { extruder: 2, ratio: 0.5 },
+    ],
+    id: Math.max(physicalCount, ...virtualExtruders.map((extruder) => extruder.id)) + 1,
+    kind: 'fullspectrum',
   });
 
   return JSON.stringify({
@@ -255,9 +283,7 @@ export async function export3mf(mesh: MeshData, fileName: string): Promise<void>
   zip.file('_rels/.rels', relsXml());
   zip.file('3D/3dmodel.model', modelXml(repairedMesh));
   zip.file(THUMBNAIL_PATH, thumbnailBlob);
-  if (getColorMixPhysicalCount(repairedMesh) !== null) {
-    zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(repairedMesh));
-  }
+  zip.file('Metadata/Prusa_Slicer_full_spectrum.json', prusaFullSpectrumJson(repairedMesh));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const url = URL.createObjectURL(new Blob([blob], { type: 'model/3mf' }));
   const anchor = document.createElement('a');
