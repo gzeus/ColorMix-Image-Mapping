@@ -150,7 +150,7 @@ function modelXml(mesh: MeshData): string {
   <metadata name="slic3rpe:MmPaintingVersion">1</metadata>
   <metadata name="Title">${escapeXml(mesh.name)}</metadata>
   <metadata name="Description">${escapeXml(mesh.name)}</metadata>
-  <metadata name="Application">3D Image Mapper</metadata>
+  <metadata name="Application">ColorMix Image Mapper</metadata>
   <resources>
     <object id="1" type="model" name="${escapeXml(mesh.name)}">
       <mesh>

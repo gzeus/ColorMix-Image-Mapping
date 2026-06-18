@@ -44,7 +44,7 @@ export function createProcessedCanvas(source: HTMLCanvasElement, blurPx: number)
   return canvas;
 }
 
-export function drawMappedImagePreview(source: HTMLCanvasElement | null, settings: ImageMappingSettings): HTMLCanvasElement | null {
+export function drawMappedImagePreview(source: HTMLCanvasElement | null, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel): HTMLCanvasElement | null {
   if (!source) {
     return null;
   }
@@ -56,7 +56,7 @@ export function drawMappedImagePreview(source: HTMLCanvasElement | null, setting
     return canvas;
   }
   const imageData = ctx.createImageData(canvas.width, canvas.height);
-  const sampler = makeImageSampler(source, settings);
+  const sampler = makeImageSampler(source, settings, padColor);
   for (let y = 0; y < canvas.height; y += 1) {
     for (let x = 0; x < canvas.width; x += 1) {
       const color = sampler(x / (canvas.width - 1), 1 - y / (canvas.height - 1));
@@ -71,7 +71,7 @@ export function drawMappedImagePreview(source: HTMLCanvasElement | null, setting
   return canvas;
 }
 
-export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSettings): (u: number, v: number) => Rgba {
+export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel): (u: number, v: number) => Rgba {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx || canvas.width < 1 || canvas.height < 1) {
     return () => fallbackPixel;
@@ -95,8 +95,17 @@ export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSett
       }
     }
 
-    mappedU = settings.repeatX ? positiveModulo(mappedU, 1) : clamp(mappedU, 0, 1);
-    mappedV = settings.repeatY ? positiveModulo(mappedV, 1) : clamp(mappedV, 0, 1);
+    if (settings.repeatX) {
+      mappedU = positiveModulo(mappedU, 1);
+    } else if (mappedU < 0 || mappedU > 1) {
+      return padColor;
+    }
+
+    if (settings.repeatY) {
+      mappedV = positiveModulo(mappedV, 1);
+    } else if (mappedV < 0 || mappedV > 1) {
+      return padColor;
+    }
 
     const x = clamp(Math.round(mappedU * (canvas.width - 1)), 0, canvas.width - 1);
     const y = clamp(Math.round(mappedV * (canvas.height - 1)), 0, canvas.height - 1);

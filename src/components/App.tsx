@@ -106,6 +106,7 @@ export default function App() {
   const processedCanvas = useMemo(() => (imageCanvas ? createProcessedCanvas(imageCanvas, relief.blurPx) : null), [imageCanvas, relief.blurPx]);
   const colorMixPalette = useMemo(() => buildColorMixPalette(colorMixFilaments), [colorMixFilaments]);
   const effectivePalette = colorMixEnabled ? colorMixPalette : palette;
+  const padColor = effectivePalette[Math.max(0, Math.min(effectivePalette.length - 1, insideMaterialIndex))] ?? fallbackPalette[0];
   const imageAspectRatio = imageCanvas ? imageCanvas.width / Math.max(1, imageCanvas.height) : null;
 
   const snapshotEditableState = useCallback((): EditableSnapshot => ({
@@ -183,7 +184,7 @@ export default function App() {
     if (!processedCanvas) {
       return;
     }
-    const preview = drawMappedImagePreview(processedCanvas, mapping);
+    const preview = drawMappedImagePreview(processedCanvas, mapping, padColor);
     if (!preview) {
       return;
     }
@@ -192,13 +193,13 @@ export default function App() {
       if (previous) URL.revokeObjectURL(previous);
       return url;
     });
-  }, [mapping, processedCanvas]);
+  }, [mapping, padColor, processedCanvas]);
 
   const buildMesh = useCallback((mode: 'preview' | 'export' | 'highExport'): MeshData | null => {
     if (!processedCanvas || effectivePalette.length === 0) {
       return null;
     }
-    const sampler = makeImageSampler(processedCanvas, mapping);
+    const sampler = makeImageSampler(processedCanvas, mapping, padColor);
     const nextShape = mode === 'preview'
       ? {
           ...shape,
@@ -222,7 +223,7 @@ export default function App() {
       case 'arc':
         return generateArc(nextShape, sampler, relief, effectivePalette, insideMaterialIndex);
     }
-  }, [effectivePalette, insideMaterialIndex, mapping, processedCanvas, relief, shape]);
+  }, [effectivePalette, insideMaterialIndex, mapping, padColor, processedCanvas, relief, shape]);
 
   useEffect(() => {
     if (!processedCanvas || effectivePalette.length === 0) {
@@ -335,7 +336,7 @@ export default function App() {
       <aside className="control-panel">
         <header>
           <p className="eyebrow">Client-side 3MF generator</p>
-          <h1>3D Image Mapper</h1>
+          <h1>ColorMix Image Mapper</h1>
           <div className="header-actions">
             <button type="button" className="primary-button" onClick={handleExport} disabled={isExporting || (!mesh && !processedCanvas)}>
               {isExporting ? 'Exporting...' : 'Export 3MF'}

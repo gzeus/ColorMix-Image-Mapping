@@ -77,13 +77,13 @@ function buildPanelMesh(
   }
 
   for (let x = 0; x < widthSegments; x += 1) {
-    addQuad(triangles, front[0][x], front[0][x + 1], back[0][x + 1], back[0][x], safeInsideMaterialIndex);
-    addQuad(triangles, front[heightSegments][x + 1], front[heightSegments][x], back[heightSegments][x], back[heightSegments][x + 1], safeInsideMaterialIndex);
+    addQuad(triangles, front[0][x + 1], front[0][x], back[0][x], back[0][x + 1], safeInsideMaterialIndex);
+    addQuad(triangles, front[heightSegments][x], front[heightSegments][x + 1], back[heightSegments][x + 1], back[heightSegments][x], safeInsideMaterialIndex);
   }
 
   for (let y = 0; y < heightSegments; y += 1) {
-    addQuad(triangles, front[y + 1][0], front[y][0], back[y][0], back[y + 1][0], safeInsideMaterialIndex);
-    addQuad(triangles, front[y][widthSegments], front[y + 1][widthSegments], back[y + 1][widthSegments], back[y][widthSegments], safeInsideMaterialIndex);
+    addQuad(triangles, front[y][0], front[y + 1][0], back[y + 1][0], back[y][0], safeInsideMaterialIndex);
+    addQuad(triangles, front[y + 1][widthSegments], front[y][widthSegments], back[y][widthSegments], back[y + 1][widthSegments], safeInsideMaterialIndex);
   }
 
   return { name, vertices, uvs, triangles, materials: palette };
