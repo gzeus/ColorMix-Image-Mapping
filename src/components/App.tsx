@@ -216,13 +216,7 @@ export default function App() {
       return null;
     }
     const sampler = makeImageSampler(processedCanvas, mapping, padColor);
-    const nextShape = mode === 'preview'
-      ? {
-          ...shape,
-          radialSegments: Math.min(160, Math.round(shape.radialSegments)),
-          heightSegments: Math.min(160, Math.round(shape.heightSegments)),
-        }
-      : mode === 'highExport'
+    const nextShape = mode === 'highExport'
       ? {
           ...shape,
           radialSegments: Math.min(1024, Math.round(shape.radialSegments * 2)),
