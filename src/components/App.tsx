@@ -8,6 +8,7 @@ import { ShapeControls } from './ShapeControls';
 import { buildColorMixPalette, defaultColorMixFilaments } from '../lib/colorMix';
 import { makePaletteColor, type PaletteColor } from '../lib/colorUtils';
 import { export3mf } from '../lib/export/export3mf';
+import { cleanupSmallColorIslands } from '../lib/geometry/cleanupColorIslands';
 import { generateCylinder } from '../lib/geometry/generateCylinder';
 import { generateArc, generatePlane } from '../lib/geometry/generatePanel';
 import { generateVase } from '../lib/geometry/generateVase';
@@ -47,6 +48,8 @@ type EditableSnapshot = {
   colorMixEnabled: boolean;
   colorMixFilaments: PaletteColor[];
   insideMaterialIndex: number;
+  cleanupColorIslands: boolean;
+  colorIslandMaxTriangles: number;
   triangulateBeforeExport: boolean;
 };
 
@@ -105,6 +108,8 @@ export default function App() {
   const [meshValidation, setMeshValidation] = useState<MeshValidationResult | null>(null);
   const [status, setStatus] = useState('Ready for an image.');
   const [isExporting, setIsExporting] = useState(false);
+  const [cleanupColorIslands, setCleanupColorIslands] = useState(false);
+  const [colorIslandMaxTriangles, setColorIslandMaxTriangles] = useState(8);
   const [triangulateBeforeExport, setTriangulateBeforeExport] = useState(false);
   const undoStack = useRef<EditableSnapshot[]>([]);
 
@@ -126,8 +131,10 @@ export default function App() {
     colorMixEnabled,
     colorMixFilaments: clonePalette(colorMixFilaments),
     insideMaterialIndex,
+    cleanupColorIslands,
+    colorIslandMaxTriangles,
     triangulateBeforeExport,
-  }), [colorCount, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
+  }), [cleanupColorIslands, colorCount, colorIslandMaxTriangles, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
 
   const pushUndo = useCallback(() => {
     undoStack.current.push(snapshotEditableState());
@@ -150,6 +157,8 @@ export default function App() {
     setColorMixEnabled(previous.colorMixEnabled);
     setColorMixFilaments(previous.colorMixFilaments);
     setInsideMaterialIndex(previous.insideMaterialIndex);
+    setCleanupColorIslands(previous.cleanupColorIslands);
+    setColorIslandMaxTriangles(previous.colorIslandMaxTriangles);
     setTriangulateBeforeExport(previous.triangulateBeforeExport);
     setStatus('Undid last change.');
   }, []);
@@ -307,15 +316,21 @@ export default function App() {
       return;
     }
     setIsExporting(true);
-    const exportValidation = validateMeshManifold(exportMesh);
     const exportName = `${safeFileNamePart(imageTitle)}_${shape.type}`;
-    const namedExportMesh: MeshData = { ...exportMesh, name: exportName };
+    const cleanupResult = cleanupColorIslands ? cleanupSmallColorIslands(exportMesh, colorIslandMaxTriangles) : null;
+    const namedExportMesh: MeshData = { ...(cleanupResult?.mesh ?? exportMesh), name: exportName };
+    const exportValidation = validateMeshManifold(namedExportMesh);
     setStatus('Exporting 3MF...');
     try {
       await export3mf(namedExportMesh, `${exportName}.3MF`);
-      setStatus(exportValidation.boundaryEdges || exportValidation.nonManifoldEdges
+      const cleanupStatus = cleanupResult && cleanupResult.replacedTriangleCount > 0
+        ? ` Cleaned ${cleanupResult.replacedIslandCount} color islands (${cleanupResult.replacedTriangleCount} triangles).`
+        : cleanupColorIslands
+        ? ' No small color islands found.'
+        : '';
+      setStatus((exportValidation.boundaryEdges || exportValidation.nonManifoldEdges
         ? `Exported 3MF, but validation found ${exportValidation.boundaryEdges} boundary and ${exportValidation.nonManifoldEdges} non-manifold edges.`
-        : 'Exported 3MF with face material colors and Prusa metadata.');
+        : 'Exported 3MF with face material colors and Prusa metadata.') + cleanupStatus);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '3MF export failed.');
     } finally {
@@ -334,6 +349,8 @@ export default function App() {
     setColorMixEnabled(false);
     setColorMixFilaments(defaultColorMixFilaments());
     setInsideMaterialIndex(1);
+    setCleanupColorIslands(false);
+    setColorIslandMaxTriangles(8);
     setTriangulateBeforeExport(false);
     setMesh(null);
     setMeshValidation(null);
@@ -408,7 +425,17 @@ export default function App() {
           triangleCount={mesh?.triangles.length ?? 0}
           status={status}
           validationWarning={validationWarning}
+          cleanupColorIslands={cleanupColorIslands}
+          colorIslandMaxTriangles={colorIslandMaxTriangles}
           triangulateBeforeExport={triangulateBeforeExport}
+          onCleanupColorIslandsChange={(enabled) => {
+            pushUndo();
+            setCleanupColorIslands(enabled);
+          }}
+          onColorIslandMaxTrianglesChange={(count) => {
+            pushUndo();
+            setColorIslandMaxTriangles(Math.max(1, Math.min(500, Math.round(count) || 1)));
+          }}
           onTriangulateBeforeExportChange={(enabled) => {
             pushUndo();
             setTriangulateBeforeExport(enabled);

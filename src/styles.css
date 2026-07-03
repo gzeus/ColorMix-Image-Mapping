@@ -357,6 +357,24 @@ header h1 {
   gap: 10px;
 }
 
+.export-number-row {
+  display: grid;
+  grid-template-columns: auto 70px;
+  align-items: center;
+  gap: 6px;
+  color: #384650;
+  font-size: 13px;
+}
+
+.export-number-row input {
+  width: 70px;
+  min-height: 34px;
+  border: 1px solid #cfd6dc;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #ffffff;
+}
+
 .export-bar p {
   margin: 3px 0 0;
   color: #61707c;
