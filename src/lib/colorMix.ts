@@ -3,6 +3,7 @@ import { colorDistanceSq, hexToRgb, makePaletteColor, rgbToHex, type PaletteColo
 type RGB = { r: number; g: number; b: number };
 type LAB = { L: number; a: number; b: number };
 type FilamentPart = { hex: string; ratio: number };
+type MixComponent = { extruder: number; ratio: number };
 
 const DEFAULT_CMYWK = ['#009bc3', '#c9378c', '#f6b921', '#252e2e', '#ffffff'];
 
@@ -125,19 +126,42 @@ export function defaultColorMixFilaments(): PaletteColor[] {
 
 export function buildColorMixPalette(filaments: PaletteColor[]): PaletteColor[] {
   const materials: PaletteColor[] = filaments.map((filament, index) => ({ ...filament, name: filament.name || `Filament ${index + 1}`, components: [{ extruder: index + 1, ratio: 1 }] }));
+  const addMix = (components: MixComponent[], name: string) => {
+    const mix = mixFilaments(components.map((component) => ({
+      hex: filaments[component.extruder - 1].hex,
+      ratio: component.ratio,
+    })));
+    materials.push({
+      ...makePaletteColor(mix.hex, materials.length, name),
+      components,
+    });
+  };
+
   for (let i = 0; i < filaments.length; i += 1) {
     for (let j = i + 1; j < filaments.length; j += 1) {
-      const mix = mixFilaments([
-        { hex: filaments[i].hex, ratio: 0.5 },
-        { hex: filaments[j].hex, ratio: 0.5 },
-      ]);
-      materials.push({
-        ...makePaletteColor(mix.hex, materials.length, `${i + 1}:${j + 1} 50/50`),
-        components: [
-          { extruder: i + 1, ratio: 0.5 },
-          { extruder: j + 1, ratio: 0.5 },
-        ],
-      });
+      addMix([
+        { extruder: i + 1, ratio: 0.25 },
+        { extruder: j + 1, ratio: 0.75 },
+      ], `${i + 1}:${j + 1} 25:75`);
+      addMix([
+        { extruder: i + 1, ratio: 0.5 },
+        { extruder: j + 1, ratio: 0.5 },
+      ], `${i + 1}:${j + 1} 50:50`);
+      addMix([
+        { extruder: i + 1, ratio: 0.75 },
+        { extruder: j + 1, ratio: 0.25 },
+      ], `${i + 1}:${j + 1} 75:25`);
+    }
+  }
+  for (let i = 0; i < filaments.length; i += 1) {
+    for (let j = i + 1; j < filaments.length; j += 1) {
+      for (let k = j + 1; k < filaments.length; k += 1) {
+        addMix([
+          { extruder: i + 1, ratio: 1 / 3 },
+          { extruder: j + 1, ratio: 1 / 3 },
+          { extruder: k + 1, ratio: 1 / 3 },
+        ], `${i + 1}:${j + 1}:${k + 1} 33:33:33`);
+      }
     }
   }
   const pure = materials.slice(0, filaments.length);

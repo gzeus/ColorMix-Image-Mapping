@@ -1,6 +1,30 @@
 import type { PaletteColor } from '../lib/colorUtils';
 import { makePaletteColor } from '../lib/colorUtils';
 
+type ColorSelectProps = {
+  colors: PaletteColor[];
+  value: number;
+  onChange: (index: number) => void;
+};
+
+function ColorSelect({ colors, value, onChange }: ColorSelectProps) {
+  const safeValue = Math.max(0, Math.min(colors.length - 1, value));
+  const selected = colors[safeValue] ?? colors[0];
+
+  return (
+    <div className="color-select">
+      <span className="color-select-preview" style={{ background: selected?.hex ?? '#ffffff' }} />
+      <select value={safeValue} onChange={(event) => onChange(Number(event.target.value))}>
+        {colors.map((color, index) => (
+          <option key={color.id} value={index}>
+            {index + 1} - {color.name || `Filament ${index + 1}`}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 type Props = {
   colorCount: number;
   lockManualPalette: boolean;
@@ -55,7 +79,7 @@ export function PaletteControls({
     onColorMixFilamentsChange(colorMixFilaments.filter((_, currentIndex) => currentIndex !== index).map((color, currentIndex) => ({ ...color, name: color.name || `Filament ${currentIndex + 1}` })));
     onInsideMaterialChange(0);
   };
-  const activePalette = colorMixEnabled ? colorMixPalette : palette;
+  const insideMaterialOptions = colorMixEnabled ? colorMixFilaments : palette;
 
   return (
     <section className="panel-section">
@@ -74,14 +98,20 @@ export function PaletteControls({
           </div>
           <button type="button" onClick={addColorMixFilament} disabled={colorMixFilaments.length >= 8}>Add ColorMix filament</button>
           <p className="helper-copy">PrusaSlicer sliced preview may show physical source filament paths; the generated swatches are predicted blend colors.</p>
-          <div className="mix-grid">
-            {colorMixPalette.map((color, index) => (
-              <div className="mix-chip" key={`${color.id}-${index}`}>
-                <span style={{ background: color.hex }} />
-                <small>{index + 1}</small>
-              </div>
-            ))}
-          </div>
+          <details className="virtual-extruders">
+            <summary>Display Virtual Extruders</summary>
+            <div className="mix-grid">
+              {colorMixPalette.slice(colorMixFilaments.length).map((color, offset) => {
+                const index = offset + colorMixFilaments.length;
+                return (
+                  <div className="mix-chip" key={`${color.id}-${index}`}>
+                    <span style={{ background: color.hex }} />
+                    <small>{index + 1}</small>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         </>
       ) : (
         <>
@@ -104,13 +134,7 @@ export function PaletteControls({
       )}
       <label className="field">
         <span>Inside / unpainted</span>
-        <select value={Math.min(insideMaterialIndex, activePalette.length - 1)} onChange={(event) => onInsideMaterialChange(Number(event.target.value))}>
-          {activePalette.map((color, index) => (
-            <option key={color.id} value={index}>
-              {index + 1} - {color.hex.toUpperCase()}
-            </option>
-          ))}
-        </select>
+        <ColorSelect colors={insideMaterialOptions} value={insideMaterialIndex} onChange={onInsideMaterialChange} />
       </label>
     </section>
   );

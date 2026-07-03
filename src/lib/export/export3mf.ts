@@ -17,9 +17,17 @@ function encodePrusaTriangleState(state: number): string {
   const bitstream: boolean[] = [false, false];
   if (state >= 3) {
     bitstream.push(true, true);
-    const extendedState = state - 3;
-    for (let bitIndex = 0; bitIndex < 4; bitIndex += 1) {
-      bitstream.push(Boolean(extendedState & (1 << bitIndex)));
+    if (state <= 16) {
+      const extendedState = state - 3;
+      for (let bitIndex = 0; bitIndex < 4; bitIndex += 1) {
+        bitstream.push(Boolean(extendedState & (1 << bitIndex)));
+      }
+    } else {
+      const extendedState = Math.min(255, state) - 17;
+      bitstream.push(false, true, true, true);
+      for (let bitIndex = 0; bitIndex < 8; bitIndex += 1) {
+        bitstream.push(Boolean(extendedState & (1 << bitIndex)));
+      }
     }
   } else {
     bitstream.push(Boolean(state & 1), Boolean(state & 2));
@@ -175,7 +183,7 @@ function modelXml(mesh: MeshData): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="${CORE_NAMESPACE}" xmlns:slic3rpe="${PRUSA_NAMESPACE}">
   <metadata name="slic3rpe:Version3mf">1</metadata>
-  <metadata name="slic3rpe:MmPaintingVersion">1</metadata>
+  <metadata name="slic3rpe:MmPaintingVersion">2</metadata>
   <metadata name="Title">${escapeXml(mesh.name)}</metadata>
   <metadata name="Description">${escapeXml(mesh.name)}</metadata>
   <metadata name="Application">ColorMix Image Mapper</metadata>

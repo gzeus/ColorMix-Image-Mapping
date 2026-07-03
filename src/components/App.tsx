@@ -111,7 +111,9 @@ export default function App() {
   const processedCanvas = useMemo(() => (imageCanvas ? createProcessedCanvas(imageCanvas, relief.blurPx) : null), [imageCanvas, relief.blurPx]);
   const colorMixPalette = useMemo(() => buildColorMixPalette(colorMixFilaments), [colorMixFilaments]);
   const effectivePalette = colorMixEnabled ? colorMixPalette : palette;
-  const padColor = effectivePalette[Math.max(0, Math.min(effectivePalette.length - 1, insideMaterialIndex))] ?? fallbackPalette[0];
+  const insideMaterialLimit = colorMixEnabled ? colorMixFilaments.length : effectivePalette.length;
+  const effectiveInsideMaterialIndex = Math.max(0, Math.min(Math.max(0, insideMaterialLimit - 1), insideMaterialIndex));
+  const padColor = effectivePalette[effectiveInsideMaterialIndex] ?? fallbackPalette[0];
   const imageAspectRatio = imageCanvas ? imageCanvas.width / Math.max(1, imageCanvas.height) : null;
 
   const snapshotEditableState = useCallback((): EditableSnapshot => ({
@@ -220,15 +222,15 @@ export default function App() {
       : shape;
     switch (nextShape.type) {
       case 'cylinder':
-        return generateCylinder(nextShape, sampler, relief, effectivePalette, insideMaterialIndex);
+        return generateCylinder(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
       case 'vase':
-        return generateVase(nextShape, sampler, relief, effectivePalette, insideMaterialIndex);
+        return generateVase(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
       case 'plane':
-        return generatePlane(nextShape, sampler, relief, effectivePalette, insideMaterialIndex);
+        return generatePlane(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
       case 'arc':
-        return generateArc(nextShape, sampler, relief, effectivePalette, insideMaterialIndex);
+        return generateArc(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
     }
-  }, [effectivePalette, insideMaterialIndex, mapping, padColor, processedCanvas, relief, shape]);
+  }, [effectiveInsideMaterialIndex, effectivePalette, mapping, padColor, processedCanvas, relief, shape]);
 
   useEffect(() => {
     if (!processedCanvas || effectivePalette.length === 0) {

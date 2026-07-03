@@ -167,6 +167,21 @@ header h1 {
   background: #ffffff;
 }
 
+.color-select {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.color-select-preview {
+  width: 38px;
+  height: 34px;
+  border: 1px solid #cfd6dc;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
 .slider-row output {
   text-align: right;
   color: #5f6f7c;
@@ -234,6 +249,18 @@ header h1 {
   max-height: 154px;
   overflow: auto;
   padding-right: 2px;
+}
+
+.virtual-extruders {
+  display: grid;
+  gap: 8px;
+}
+
+.virtual-extruders summary {
+  cursor: pointer;
+  color: #384650;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .mix-chip {
