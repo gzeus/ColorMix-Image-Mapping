@@ -5,7 +5,7 @@ type LAB = { L: number; a: number; b: number };
 type FilamentPart = { hex: string; ratio: number };
 type MixComponent = { extruder: number; ratio: number };
 
-const DEFAULT_CMYWK = ['#009bc3', '#c9378c', '#f6b921', '#252e2e', '#ffffff'];
+const DEFAULT_CMYWB = ['#009bc3', '#c9378c', '#f6b921', '#ffffff', '#252e2e'];
 
 function srgbToLinear(c: number): number {
   const v = c / 255;
@@ -121,7 +121,7 @@ export function mixFilaments(parts: FilamentPart[]): { hex: string; lab: LAB; rg
 }
 
 export function defaultColorMixFilaments(): PaletteColor[] {
-  return DEFAULT_CMYWK.map((hex, index) => makePaletteColor(hex, index, ['Cyan', 'Magenta', 'Yellow', 'Black', 'White'][index]));
+  return DEFAULT_CMYWB.map((hex, index) => makePaletteColor(hex, index, ['Cyan', 'Magenta', 'Yellow', 'White', 'Black'][index]));
 }
 
 export function buildColorMixPalette(filaments: PaletteColor[]): PaletteColor[] {

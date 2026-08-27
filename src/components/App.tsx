@@ -19,7 +19,7 @@ import { quantizeCanvas } from '../lib/quantization';
 
 const defaultMapping: ImageMappingSettings = { fitMode: 'stretch', offsetU: 0, offsetV: 0, scale: 1, mirrorX: false, flipY: false, repeatX: true, repeatY: false };
 const defaultShape: ShapeSettings = {
-  type: 'cylinder',
+  type: 'arc',
   heightMm: 110,
   widthMm: 90,
   diameterMm: 70,
@@ -27,10 +27,10 @@ const defaultShape: ShapeSettings = {
   bottomDiameterMm: 54,
   middleDiameterMm: 82,
   topDiameterMm: 48,
-  wallThicknessMm: 2,
+  wallThicknessMm: 3,
   bottomThicknessMm: 2,
-  radialSegments: 128,
-  heightSegments: 128,
+  radialSegments: 256,
+  heightSegments: 256,
   openTop: true,
   addBottom: true,
   scaleLocked: true,
@@ -101,16 +101,16 @@ export default function App() {
   const [colorCount, setColorCount] = useState(4);
   const [lockManualPalette, setLockManualPalette] = useState(false);
   const [palette, setPalette] = useState<PaletteColor[]>(fallbackPalette);
-  const [colorMixEnabled, setColorMixEnabled] = useState(false);
+  const [colorMixEnabled, setColorMixEnabled] = useState(true);
   const [colorMixFilaments, setColorMixFilaments] = useState<PaletteColor[]>(defaultColorMixFilaments());
-  const [insideMaterialIndex, setInsideMaterialIndex] = useState(1);
+  const [insideMaterialIndex, setInsideMaterialIndex] = useState(3);
   const [mesh, setMesh] = useState<MeshData | null>(null);
   const [meshValidation, setMeshValidation] = useState<MeshValidationResult | null>(null);
   const [status, setStatus] = useState('Ready for an image.');
   const [isExporting, setIsExporting] = useState(false);
-  const [cleanupColorIslands, setCleanupColorIslands] = useState(false);
+  const [cleanupColorIslands, setCleanupColorIslands] = useState(true);
   const [colorIslandMaxTriangles, setColorIslandMaxTriangles] = useState(8);
-  const [triangulateBeforeExport, setTriangulateBeforeExport] = useState(false);
+  const [triangulateBeforeExport, setTriangulateBeforeExport] = useState(true);
   const undoStack = useRef<EditableSnapshot[]>([]);
 
   const processedCanvas = useMemo(() => (imageCanvas ? createProcessedCanvas(imageCanvas, relief.blurPx) : null), [imageCanvas, relief.blurPx]);
@@ -335,21 +335,21 @@ export default function App() {
   const handleResetSettings = useCallback(() => {
     pushUndo();
     setMapping(defaultMapping);
-    setShape(defaultShapeForImage(shape.type, imageCanvas));
+    setShape(defaultShapeForImage(defaultShape.type, imageCanvas));
     setRelief(defaultRelief);
     setColorCount(4);
     setLockManualPalette(false);
     setPalette(fallbackPalette);
-    setColorMixEnabled(false);
+    setColorMixEnabled(true);
     setColorMixFilaments(defaultColorMixFilaments());
-    setInsideMaterialIndex(1);
-    setCleanupColorIslands(false);
+    setInsideMaterialIndex(3);
+    setCleanupColorIslands(true);
     setColorIslandMaxTriangles(8);
-    setTriangulateBeforeExport(false);
+    setTriangulateBeforeExport(true);
     setMesh(null);
     setMeshValidation(null);
     setStatus(imageCanvas ? 'Settings reset. Generating preview...' : 'Settings reset. Ready for an image.');
-  }, [imageCanvas, pushUndo, shape.type]);
+  }, [imageCanvas, pushUndo]);
 
   const handleColorCountChange = (count: number) => {
     pushUndo();

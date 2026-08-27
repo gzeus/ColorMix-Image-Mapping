@@ -92,6 +92,27 @@ header h1 {
   font-size: 15px;
 }
 
+.resolution-section {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.resolution-section h3,
+.resolution-section p {
+  margin: 0;
+}
+
+.resolution-section h3 {
+  font-size: 13px;
+}
+
+.resolution-section p {
+  color: #61707c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .section-title {
   display: flex;
   align-items: center;
@@ -205,12 +226,14 @@ header h1 {
 }
 
 .segmented .active,
+.preset-row .active,
 .palette-grid input:focus-visible,
 .primary-button {
   border-color: #176b87;
 }
 
-.segmented .active {
+.segmented .active,
+.preset-row .active {
   background: #e2f3f6;
 }
 

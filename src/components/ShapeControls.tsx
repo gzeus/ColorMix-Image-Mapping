@@ -143,10 +143,15 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
       {settings.type === 'cylinder' || settings.type === 'vase' ? (
         <label className="number-row"><span>Bottom mm</span><input type="number" min="0.2" step="0.2" value={settings.bottomThicknessMm} onChange={(e) => patch({ bottomThicknessMm: Number(e.target.value) })} /></label>
       ) : null}
-      <div className="preset-row">
-        {Object.entries(presets).map(([name, values]) => (
-          <button type="button" key={name} onClick={() => patch(values)}>{name}</button>
-        ))}
+      <div className="resolution-section">
+        <h3>Image Mapping Resolution</h3>
+        <p>Higher resolution means better quality, but also slower export and slicing</p>
+        <div className="preset-row">
+          {Object.entries(presets).map(([name, values]) => {
+            const isActive = settings.radialSegments === values.radialSegments && settings.heightSegments === values.heightSegments;
+            return <button type="button" className={isActive ? 'active' : ''} key={name} onClick={() => patch(values)}>{name}</button>;
+          })}
+        </div>
       </div>
       <label className="number-row"><span>{settings.type === 'plane' || settings.type === 'arc' ? 'Width seg.' : 'Radial'}</span><input type="number" min={settings.type === 'plane' || settings.type === 'arc' ? '1' : '8'} max="768" value={settings.radialSegments} onChange={(e) => patch({ radialSegments: Number(e.target.value) })} /></label>
       <label className="number-row"><span>Height seg.</span><input type="number" min="2" max="768" value={settings.heightSegments} onChange={(e) => patch({ heightSegments: Number(e.target.value) })} /></label>

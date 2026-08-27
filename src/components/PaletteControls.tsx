@@ -58,12 +58,16 @@ export function PaletteControls({
 }: Props) {
   const updateColor = (index: number, hex: string) => {
     const next = [...palette];
-    next[index] = makePaletteColor(hex, index, next[index]?.name ?? `Material ${index + 1}`);
+    const updated = makePaletteColor(hex, index, next[index]?.name ?? `Material ${index + 1}`);
+    // Keep the React key stable while the native color dialog emits live updates.
+    next[index] = { ...updated, id: next[index]?.id ?? updated.id };
     onPaletteChange(next);
   };
   const updateColorMixFilament = (index: number, hex: string) => {
     const next = [...colorMixFilaments];
-    next[index] = makePaletteColor(hex, index, next[index]?.name ?? `Filament ${index + 1}`);
+    const updated = makePaletteColor(hex, index, next[index]?.name ?? `Filament ${index + 1}`);
+    // Changing a color must not recreate the input, or the browser closes its picker.
+    next[index] = { ...updated, id: next[index]?.id ?? updated.id };
     onColorMixFilamentsChange(next);
   };
   const addColorMixFilament = () => {
