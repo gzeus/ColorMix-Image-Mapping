@@ -1,6 +1,6 @@
 # 3D Image Mapper
 
-A client-side Vite + React app for turning uploaded images into multicolor, 3D-printable cylinders or simple vase shapes. The image is sampled onto generated geometry, quantized into a small material palette, assigned per triangle, previewed with three.js, and exported as a face-material-colored 3MF.
+A client-side Vite + React app for mapping uploaded images onto procedural shapes or imported STL, 3MF, and OBJ models for multicolor printing. The image is sampled onto generated geometry, quantized into a small material palette, assigned per triangle, previewed with three.js, and exported as a face-material-colored 3MF.
 
 ## Run Locally
 
@@ -12,7 +12,9 @@ npm run dev
 ## What It Does
 
 - Upload PNG, JPG, or WebP images.
-- Map the image around a cylinder or procedural vase.
+- Map the image around a cylinder or procedural vase, or onto a plane or arc.
+- Import custom STL, 3MF, or OBJ geometry, scale it uniformly, and rotate it.
+- Project onto visible surfaces from a chosen view or wrap around the vertical axis.
 - Control stretch/contain/cover fit, scale, offsets, horizontal mirror, and horizontal repeat.
 - Quantize to 2, 3, 4, 5, 8, or 16 colors.
 - Edit the palette directly or use a manual filament palette.
@@ -24,24 +26,43 @@ npm run dev
 
 The outer side surface uses angular coordinate `u` and height coordinate `v`. Triangle material assignment samples the mapped image at the triangle center. Inner walls, rim, and bottom use the last palette color as the inside/base material.
 
+## Custom Models
+
+Under **Shape > Model source**, choose **Custom STL / 3MF / OBJ** and load a model. You can also drop a model and an image into the app. Models are visible before loading an image.
+
+- Set **Scale %** or any dimension; proportions stay locked. Rotate X/Y/Z in 90-degree steps to choose the printing orientation. The model is centered and placed on the bed.
+- In **Place image from a view**, orbit the preview or use Front/Side/Top, then click **Project from view**. The placement stays fixed while the camera moves. **Move image** aligns the view to that placement and lets you drag the orange image frame; colors update on release. Resize with **Image size**, and rotate with **Image angle** under Shape.
+- **Visible surfaces only** prevents projection through foreground geometry and leaves surfaces beyond a 75-degree facing angle unpainted. Turning it off projects through the whole model.
+- **Wrap around vertical axis** maps angle to image X and height to image Y. Rotate the model to change its wrapping axis. Image offsets move the artwork/seam; horizontal repetition is optional.
+- **Inside / unpainted** selects the base color, including transparent image areas. **Shape shading** helps inspect geometry but only affects the preview lighting, not exported colors. It is automatically used before an image is loaded.
+- **Standard / Fine** controls edge-length refinement. Shared edges are split together without smoothing or displacing the original surface. Processing runs in a cancellable worker, with a 400,000-triangle limit. A status message reports when that limit prevents the requested detail.
+- Custom exports use the displayed mesh and ColorMix assignments. The procedural shape controls for extra export subdivision and triangle-count island cleanup do not apply to imports. Relief remains available for simple shapes.
+
+STL supports ASCII and binary encoding. STL/OBJ coordinates are interpreted as millimeters with Z up; use scaling and rotation to correct other conventions. 3MF import reads declared units, build/component transforms, and referenced model parts. Imported textures, paint, and slicer configuration are replaced by this project's image/palette. Multiple build items are retained together as one exported mesh; this is not a slicer-project editor. Files are limited to 80 MB and 400,000 source triangles. Open/non-manifold geometry is reported, not automatically repaired.
+
+The first version supports one image placement at a time. Very small image features may be lost at the triangle limit; cylindrical projection distorts complex appendages and end faces. Printed ColorMix appearance still depends on layer height, filament, and surface orientation.
+
+## Validation
+
+`npm run build` checks TypeScript and the production bundle. `scripts/custom-model-browser-tests.mjs` exercises import formats, 3MF units/assemblies, mesh refinement, occlusion, the React/worker workflow, dragging, export metadata and geometry roundtripping, and returning to simple shapes. It requires Vite at `http://127.0.0.1:5173` and a local Chromium browser with remote debugging on port 9223. Run it with `node scripts/custom-model-browser-tests.mjs`. If present, the repository's Benchbin and Gecko 3MF files are also tested. Screenshots go to `node_modules/.tmp/`.
+
 ## 3MF Compatibility
 
-The exporter writes generic 3MF `basematerials` and per-triangle material references. It also follows the sibling Color Mix Shading app's PrusaSlicer strategy by adding `slic3rpe:mmu_segmentation` triangle attributes plus `Metadata/Slic3r_PE.config`, `Metadata/Slic3r_PE_model.config`, and `Metadata/Prusa_Slicer_full_spectrum.json`.
+The exporter follows the sibling Color Mix Shading app's PrusaSlicer strategy, writing `slic3rpe:mmu_segmentation` triangle attributes and `Metadata/Prusa_Slicer_full_spectrum.json` with virtual material recipes. It also includes a model thumbnail. A generic texture preview alone is not the exported color representation.
 
 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.
 
 ## Known Limitations
 
-- No dithering or color island cleanup yet.
-- Meshes are generated in the browser main thread.
+- No dithering; procedural shapes support triangle-count color island cleanup.
+- Procedural meshes and model file parsing run on the main thread; custom projection/refinement runs in a worker.
 - Vase normals are approximate.
 - Filament color matching uses RGB distance.
 - PrusaSlicer behavior should be tested against target versions and MMU workflows.
 
 ## Roadmap
 
-- ColorMix support.
-- Arbitrary STL import.
+- Multiple image placements and region selection.
 - Region cleanup / island removal.
 - Lab color matching.
 - Real filament preset library.

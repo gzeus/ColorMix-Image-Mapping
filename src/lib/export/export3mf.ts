@@ -53,7 +53,8 @@ function repairMeshForExport(mesh: MeshData): MeshData {
     const x = Math.round(mesh.vertices[i] * precision) / precision;
     const y = Math.round(mesh.vertices[i + 1] * precision) / precision;
     const z = Math.round(mesh.vertices[i + 2] * precision) / precision;
-    const key = `${x},${y},${z}`;
+    // Imported parts are already indexed. Do not fuse touching but separate shells.
+    const key = mesh.preserveTopology ? `${i / 3}` : `${x},${y},${z}`;
     let nextIndex = vertexMap.get(key);
     if (nextIndex === undefined) {
       nextIndex = vertices.length / 3;

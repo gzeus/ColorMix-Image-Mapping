@@ -1,4 +1,5 @@
 type Props = {
+  customModel?: boolean;
   canExport: boolean;
   isExporting: boolean;
   triangleCount: number;
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function ExportPanel({
+  customModel,
   canExport,
   isExporting,
   triangleCount,
@@ -35,6 +37,7 @@ export function ExportPanel({
         {validationWarning ? <p className="warning">{validationWarning}</p> : null}
       </div>
       <div className="export-actions">
+        {!customModel && <>
         <label className="check-row"><input type="checkbox" checked={triangulateBeforeExport} onChange={(event) => onTriangulateBeforeExportChange(event.target.checked)} /> Triangulate detail on export</label>
         <label className="check-row"><input type="checkbox" checked={cleanupColorIslands} onChange={(event) => onCleanupColorIslandsChange(event.target.checked)} /> Clean small color islands</label>
         {cleanupColorIslands ? (
@@ -43,6 +46,8 @@ export function ExportPanel({
             <input type="number" min={1} max={500} step={1} value={colorIslandMaxTriangles} onChange={(event) => onColorIslandMaxTrianglesChange(Number(event.target.value))} />
           </label>
         ) : null}
+        </>}
+        {customModel && <span className="helper-copy">Exports the preview mesh and colors.</span>}
         <button type="button" className="primary-button" disabled={!canExport || isExporting} onClick={onExport}>
           {isExporting ? 'Exporting...' : 'Export 3MF'}
         </button>

@@ -55,6 +55,7 @@ export type TriangleData = {
 
 export type MeshData = {
   name: string;
+  preserveTopology?: boolean;
   vertices: number[];
   normals?: number[];
   uvs?: number[];

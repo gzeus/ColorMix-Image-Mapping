@@ -232,6 +232,38 @@ header h1 {
   border-color: #176b87;
 }
 
+.custom-model-controls { display: grid; gap: 10px; }
+.model-name { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.model-name small { display: block; color: #61707c; margin-top: 4px; }
+.projection-toolbar {
+  position: absolute;
+  z-index: 2;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+}
+.projection-toolbar .helper-copy { flex-basis: 100%; }
+.projection-toolbar .active { background: #e2f3f6; border-color: #176b87; }
+.preview-progress { position: absolute; top: 60px; left: 16px; padding: 8px 12px; background: #ffffffdf; border-radius: 6px; pointer-events: none; }
+.moving-image canvas { cursor: move; touch-action: none; }
+.viewport-toolbar { flex-wrap: wrap; left: 14px; justify-content: flex-end; }
+.number-row { grid-template-columns: 100px minmax(0, 1fr); }
+.work-area { position: sticky; top: 0; height: 100vh; }
+
+@media (max-width: 900px) {
+  .work-area { position: static; height: auto; }
+  .preview-panel { min-height: 560px; }
+  .export-bar { flex-wrap: wrap; }
+}
+
 .segmented .active,
 .preset-row .active {
   background: #e2f3f6;
