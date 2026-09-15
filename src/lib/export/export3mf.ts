@@ -1,3 +1,4 @@
+import { encodePrusaTriangleState } from '../geometry/prusaPaint';
 import JSZip from 'jszip';
 import type { MeshData } from '../geometry/meshTypes';
 
@@ -11,36 +12,6 @@ const THUMBNAIL_PATH = 'Metadata/Thumbnail.png';
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function encodePrusaTriangleState(state: number): string {
-  const bitstream: boolean[] = [false, false];
-  if (state >= 3) {
-    bitstream.push(true, true);
-    if (state <= 16) {
-      const extendedState = state - 3;
-      for (let bitIndex = 0; bitIndex < 4; bitIndex += 1) {
-        bitstream.push(Boolean(extendedState & (1 << bitIndex)));
-      }
-    } else {
-      const extendedState = Math.min(255, state) - 17;
-      bitstream.push(false, true, true, true);
-      for (let bitIndex = 0; bitIndex < 8; bitIndex += 1) {
-        bitstream.push(Boolean(extendedState & (1 << bitIndex)));
-      }
-    }
-  } else {
-    bitstream.push(Boolean(state & 1), Boolean(state & 2));
-  }
-  let output = '';
-  for (let offset = 0; offset < bitstream.length; offset += 4) {
-    let nibble = 0;
-    for (let bitIndex = 3; bitIndex >= 0; bitIndex -= 1) {
-      nibble = (nibble << 1) | (bitstream[offset + bitIndex] ? 1 : 0);
-    }
-    output = nibble.toString(16).toUpperCase() + output;
-  }
-  return output;
 }
 
 function repairMeshForExport(mesh: MeshData): MeshData {
@@ -113,7 +84,7 @@ function getColorMixPhysicalCount(mesh: MeshData): number | null {
 
 function getMaxUsedMaterialCount(mesh: MeshData): number {
   // Spreading a large mesh into Math.max exceeds the engine's argument limit.
-  return mesh.triangles.reduce((count, triangle) => Math.max(count, triangle.materialIndex + 1), 1);
+  return (mesh.paintPreview?.triangles ?? mesh.triangles).reduce((count, triangle) => Math.max(count, triangle.materialIndex + 1), 1);
 }
 
 function parseHexColor(hex: string): [number, number, number] {
@@ -178,7 +149,7 @@ function modelXml(mesh: MeshData): string {
   }
   const triangles = mesh.triangles.map((triangle) => {
     const materialIndex = Math.max(0, Math.min(mesh.materials.length - 1, triangle.materialIndex));
-    const prusaState = encodePrusaTriangleState(materialIndex + 1);
+    const prusaState = triangle.prusaPaint ?? encodePrusaTriangleState(materialIndex + 1);
     return `<triangle v1="${triangle.a}" v2="${triangle.b}" v3="${triangle.c}" slic3rpe:mmu_segmentation="${prusaState}" />`;
   }).join('');
 
@@ -217,7 +188,8 @@ function projectIso(x: number, y: number, z: number): [number, number, number] {
   return [px, py, depth];
 }
 
-function createThumbnailBlob(mesh: MeshData): Promise<Blob> {
+function createThumbnailBlob(model: MeshData): Promise<Blob> {
+  const mesh = model.paintPreview ? { ...model, ...model.paintPreview } : model;
   const canvas = document.createElement('canvas');
   canvas.width = 480;
   canvas.height = 240;

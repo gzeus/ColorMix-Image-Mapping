@@ -3,8 +3,8 @@ import type { ProjectionRequest } from './projectModel';
 import type { MeshData } from './meshTypes';
 import type { MeshValidationResult } from './validateMesh';
 
-export type CustomExportSettings = { multiplier: number; budget: number; islandAreaMm2: number };
-export const defaultCustomExportSettings: CustomExportSettings = { multiplier: 2, budget: 1_000_000, islandAreaMm2: 0.05 };
+export type CustomExportSettings = { encoding: 'subtriangle' | 'geometry'; multiplier: number; budget: number; islandAreaMm2: number };
+export const defaultCustomExportSettings: CustomExportSettings = { encoding: 'subtriangle', multiplier: 2, budget: 1_000_000, islandAreaMm2: 0.05 };
 export type PreparedModel = {
   mesh: MeshData; limited: boolean; painted: number; validation: MeshValidationResult;
   cleanup: { replacedIslandCount: number; replacedTriangleCount: number } | null;

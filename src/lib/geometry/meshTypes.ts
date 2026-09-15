@@ -51,6 +51,8 @@ export type TriangleData = {
   c: number;
   materialIndex: number;
   projectionRegion?: 0 | 1;
+  paintNode?: number;
+  prusaPaint?: string;
   uvCenter?: { u: number; v: number };
 };
 
@@ -62,6 +64,8 @@ export type MeshData = {
   uvs?: number[];
   triangles: TriangleData[];
   materials: PaletteColor[];
+  paintLeafCount?: number;
+  paintPreview?: { vertices: number[]; triangles: TriangleData[] };
 };
 
 export type Sampler = (u: number, v: number) => Rgba;

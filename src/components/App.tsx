@@ -320,14 +320,14 @@ export default function App() {
         setMesh(data.mesh);
         setMeshValidation(data.validation);
         setStatus(!processedCanvas ? 'Model ready. Add an image to paint it.' : data.limited
-          ? 'Preview ready. Detail reached the triangle limit; some image features may be coarse.'
+          ? `Preview ready. ${customExportSettings.encoding === 'subtriangle' ? 'Paint sampling' : 'Triangle'} budget reached; use export detail for finer colors.`
           : data.painted === 0 ? 'No image colors visible. Adjust placement or choose Project from view.'
           : 'Preview ready. Use Preview export to check extra detail and cleanup.');
       };
       worker.onerror = () => { setMesh(null); setIsBuilding(false); setStatus('Model processing failed. Try a smaller model.'); };
       const timer = window.setTimeout(() => worker.postMessage({ source: customModel, settings: customSettings, mapping,
         pixels: pixels ? { data: pixels.data, width: pixels.width, height: pixels.height } : null,
-        palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex,
+        palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex, paintEncoding: customExportSettings.encoding,
       }), 180);
       return () => { window.clearTimeout(timer); worker.terminate(); };
     }
@@ -410,7 +410,7 @@ export default function App() {
     const result = await prepareCustomExport({
       source: customModel, settings: customSettings, mapping,
       pixels: pixels ? { data: pixels.data, width: pixels.width, height: pixels.height } : null,
-      palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex,
+      palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex, paintEncoding: customExportSettings.encoding,
       refinement: triangulateBeforeExport ? { multiplier: customExportSettings.multiplier, budget: customExportSettings.budget } : undefined,
       cleanupAreaMm2: cleanupColorIslands ? customExportSettings.islandAreaMm2 : undefined,
     });
@@ -423,7 +423,7 @@ export default function App() {
     const cleanup = result.cleanup?.replacedIslandCount
       ? ` Cleaned ${result.cleanup.replacedIslandCount} islands (${result.cleanup.replacedTriangleCount} triangles).`
       : result.cleanup ? ' No small color islands found.' : '';
-    return `${result.mesh.triangles.length.toLocaleString()} triangles.${result.limited ? ' Triangle budget reached; some detail remains coarse.' : ''}${cleanup}`;
+    return `${result.mesh.triangles.length.toLocaleString()} geometry triangles.${result.mesh.paintLeafCount !== undefined ? ` ${result.mesh.paintLeafCount.toLocaleString()} paint regions.` : ''}${result.limited ? ' Sampling budget reached; some detail remains coarse.' : ''}${cleanup}`;
   };
 
   const handlePreviewExport = async () => {
@@ -563,6 +563,7 @@ export default function App() {
           canExport={!isBuilding && !modelLoading && (modelSource === 'custom' ? Boolean(mesh) : Boolean(mesh || processedCanvas))}
           isExporting={isExporting}
           triangleCount={mesh?.triangles.length ?? 0}
+          paintLeafCount={mesh?.paintLeafCount}
           status={status}
           validationWarning={validationWarning}
           cleanupColorIslands={cleanupColorIslands}

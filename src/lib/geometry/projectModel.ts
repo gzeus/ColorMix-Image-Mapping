@@ -1,3 +1,4 @@
+import type { PaintForest, PaintNode } from './prusaPaint';
 import { Box3, Ray, Triangle, Vector3 } from 'three';
 import { nearestPaletteIndex, type PaletteColor, type Rgba } from '../colorUtils';
 import { makeImageCoordinateMapper, makePixelSampler, type ImagePixels } from '../imageSampling';
@@ -9,9 +10,10 @@ const edgeKey = (a: number, b: number) => a < b ? `${a}:${b}` : `${b}:${a}`;
 
 // Split shared edges together, preserving the original surface and sharp edges.
 type RefinementPriority = (face: Face, vertices: number[]) => [number, number, number];
-export function refineMesh(source: MeshData, target: number, budget = 400_000, priority?: RefinementPriority) {
+export function refineMesh(source: MeshData, target: number, budget = 400_000, priority?: RefinementPriority, capturePaint = false) {
   const vertices = source.vertices.slice();
-  let triangles = source.triangles;
+  const nodes: PaintNode[] = capturePaint ? source.triangles.map(face => ({ split: 0, side: 0, children: [], materialIndex: face.materialIndex })) : [];
+  let triangles = capturePaint ? source.triangles.map((face, paintNode) => ({ ...face, paintNode })) : source.triangles;
   let limited = false;
   for (let pass = 0; pass < 16; pass++) {
     const marked = new Map<string, { a: number; b: number; score: number; cost: number }>();
@@ -54,25 +56,41 @@ export function refineMesh(source: MeshData, target: number, budget = 400_000, p
       const ids = [face.a, face.b, face.c];
       const mids = ids.map((a, i) => midpoints.get(edgeKey(a, ids[(i + 1) % 3])));
       const splitCount = mids.filter(mid => mid !== undefined).length;
-      const add = (a: number, b: number, c: number) => next.push({ ...face, a, b, c });
+      const children: number[] = [];
+      const add = (a: number, b: number, c: number) => {
+        if (capturePaint) {
+          const paintNode = nodes.length;
+          nodes.push({ split: 0, side: 0, children: [], materialIndex: face.materialIndex });
+          children.push(paintNode);
+          next.push({ ...face, a, b, c, paintNode });
+        } else next.push({ ...face, a, b, c });
+      };
+      let side = 0;
       if (splitCount === 3) {
         const [a, b, c] = ids, [ab, bc, ca] = mids as number[];
-        add(a, ab, ca); add(ab, b, bc); add(ca, bc, c); add(ab, bc, ca);
+        add(a, ab, ca); add(ab, b, bc); add(bc, c, ca); add(ab, bc, ca);
       } else if (splitCount === 2) {
         const i = mids.findIndex((mid, i) => mid !== undefined && mids[(i + 1) % 3] !== undefined);
         const a = ids[i], b = ids[(i + 1) % 3], c = ids[(i + 2) % 3];
         const ab = mids[i]!, bc = mids[(i + 1) % 3]!;
-        add(ab, b, bc); add(a, ab, c); add(ab, bc, c);
+        side = (i + 1) % 3;
+        add(b, bc, ab); add(bc, c, ab); add(c, a, ab);
       } else if (splitCount === 1) {
         const i = mids.findIndex(mid => mid !== undefined);
         const a = ids[i], b = ids[(i + 1) % 3], c = ids[(i + 2) % 3], mid = mids[i]!;
-        add(a, mid, c); add(mid, b, c);
+        side = (i + 2) % 3;
+        add(c, a, mid); add(mid, b, c);
       } else next.push(face);
+      if (capturePaint && splitCount) {
+        const node = nodes[face.paintNode!];
+        node.split = splitCount; node.side = side; node.children = children;
+      }
     }
     triangles = next;
     if (pass === 15) limited = true;
   }
-  return { mesh: { ...source, vertices, triangles }, limited };
+  const paintForest: PaintForest | undefined = capturePaint ? { original: source, nodes } : undefined;
+  return { mesh: { ...source, vertices, triangles }, limited, paintForest };
 }
 
 type Node = { box: Box3; faces?: Triangle[]; left?: Node; right?: Node };
@@ -98,10 +116,11 @@ export type ProjectionRequest = {
   pixels: ImagePixels | null; palette: PaletteColor[]; baseIndex: number;
   refinement?: { multiplier: number; budget: number };
   cleanupAreaMm2?: number;
+  paintEncoding?: 'subtriangle' | 'geometry';
 
 };
 
-export function projectModel({ source, settings, mapping, pixels, palette, baseIndex, refinement }: ProjectionRequest) {
+export function projectModel({ source, settings, mapping, pixels, palette, baseIndex, refinement, paintEncoding }: ProjectionRequest) {
   const original = transformModel(source, settings);
   const frame = projectionFrame(original, settings);
   const size = meshBounds(original).getSize(new Vector3());
@@ -150,7 +169,7 @@ export function projectModel({ source, settings, mapping, pixels, palette, baseI
       return length * detail * (boundary ? 4 : 1);
     }) as [number, number, number];
   };
-  const refined = pixels ? refineMesh(original, maxSize / detail, refinement?.budget ?? 400_000, priority) : { mesh: original, limited: false };
+  const refined = pixels ? refineMesh(original, maxSize / detail, refinement?.budget ?? 400_000, priority, paintEncoding === 'subtriangle') : { mesh: original, limited: false, paintForest: undefined };
   const mesh = refined.mesh;
   let painted = 0;
   const triangles = mesh.triangles.map(face => {
@@ -184,5 +203,5 @@ export function projectModel({ source, settings, mapping, pixels, palette, baseI
     }
     return { ...face, materialIndex, projectionRegion };
   });
-  return { mesh: { ...mesh, triangles, materials: palette }, limited: refined.limited, painted };
+  return { mesh: { ...mesh, triangles, materials: palette }, limited: refined.limited, painted, paintForest: refined.paintForest };
 }

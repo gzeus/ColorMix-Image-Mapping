@@ -20,7 +20,8 @@ type MeshBounds = {
   maxDimension: number;
 };
 
-function toBufferGeometry(mesh: MeshData): THREE.BufferGeometry {
+function toBufferGeometry(model: MeshData): THREE.BufferGeometry {
+  const mesh = model.paintPreview ? { ...model, ...model.paintPreview } : model;
   const geometry = new THREE.BufferGeometry();
   const positions: number[] = [];
   const colors: number[] = [];
