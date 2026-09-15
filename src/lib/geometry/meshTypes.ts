@@ -58,6 +58,7 @@ export type TriangleData = {
 
 export type MeshData = {
   name: string;
+  extruderSetup?: { physicalExtruders: PaletteColor[]; fullSpectrum: string };
   preserveTopology?: boolean;
   vertices: number[];
   normals?: number[];

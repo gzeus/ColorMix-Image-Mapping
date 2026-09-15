@@ -23,11 +23,11 @@ export function packPrusaPaint(forest: PaintForest, coloredMesh: MeshData): Mesh
   type Encoded = { text: string; uniform: number | null; leaves: number; representative: number };
   const encode = (index: number): Encoded => {
     const node = nodes[index];
-    if (!node.children.length) return { text: encodePrusaTriangleState(node.materialIndex + 1), uniform: node.materialIndex, leaves: 1, representative: node.materialIndex };
+    if (!node.children.length) return { text: encodePrusaTriangleState(coloredMesh.materials[node.materialIndex].extruderId ?? node.materialIndex + 1), uniform: node.materialIndex, leaves: 1, representative: node.materialIndex };
     const children = node.children.map(encode);
     const material = children[0].uniform;
     if (material !== null && children.every(child => child.uniform === material)) {
-      return { text: encodePrusaTriangleState(material + 1), uniform: material, leaves: 1, representative: material };
+      return { text: encodePrusaTriangleState(coloredMesh.materials[material].extruderId ?? material + 1), uniform: material, leaves: 1, representative: material };
     }
     return {
       text: children.map(child => child.text).join('') + (node.split | node.side << 2).toString(16).toUpperCase(),

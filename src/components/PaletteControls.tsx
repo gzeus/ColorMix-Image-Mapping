@@ -1,3 +1,4 @@
+import type { MeshData } from '../lib/geometry/meshTypes';
 import type { PaletteColor } from '../lib/colorUtils';
 import { makePaletteColor } from '../lib/colorUtils';
 
@@ -26,6 +27,8 @@ function ColorSelect({ colors, value, onChange }: ColorSelectProps) {
 }
 
 type Props = {
+  importedSetup?: MeshData['extruderSetup'];
+  importedMaterials?: PaletteColor[];
   colorCount: number;
   lockManualPalette: boolean;
   palette: PaletteColor[];
@@ -42,6 +45,7 @@ type Props = {
 };
 
 export function PaletteControls({
+  importedSetup, importedMaterials,
   colorCount,
   lockManualPalette,
   palette,
@@ -56,6 +60,24 @@ export function PaletteControls({
   onColorMixFilamentsChange,
   onInsideMaterialChange,
 }: Props) {
+  if (importedSetup && importedMaterials) {
+    const physical = importedSetup.physicalExtruders;
+    const virtual = importedMaterials.slice(physical.length);
+    return <section className="panel-section">
+      <h2>Color / MMU</h2>
+      <p>{physical.length} physical extruders, {virtual.length} virtual extruders imported</p>
+      <div className="palette-grid">{physical.map(material => <label className="swatch-field" key={material.extruderId} title={material.hex}>
+        <input type="color" disabled value={material.hex} readOnly /><span>{material.extruderId}</span>
+      </label>)}</div>
+      {virtual.length > 0 && <details className="virtual-extruders" open>
+        <summary>Imported virtual extruders</summary>
+        <div className="mix-grid">{virtual.map(material => <div className="mix-chip" key={material.extruderId} title={`${material.hex}: ${material.components?.map(c => `E${c.extruder} ${(c.ratio * 100).toFixed(2)}%`).join(' + ')}`}>
+          <span style={{ background: material.hex }} /><small>{material.extruderId}</small>
+        </div>)}</div>
+      </details>}
+      <p className="helper-copy">Original extruder IDs, colors, and mixing recipes are retained for preview and export.</p>
+    </section>;
+  }
   const updateColor = (index: number, hex: string) => {
     const next = [...palette];
     const updated = makePaletteColor(hex, index, next[index]?.name ?? `Material ${index + 1}`);

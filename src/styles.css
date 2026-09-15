@@ -467,3 +467,5 @@ header h1 {
 
 .palette-lock { border: 0; padding: 0; margin: 0; min-width: 0; }
 .palette-lock:disabled { opacity: 0.65; }
+
+.palette-lock.imported-palette:disabled { opacity: 1; }

@@ -1,3 +1,4 @@
+import { decodePaint } from './readPrusaPaint';
 import type { PaintForest, PaintNode } from './prusaPaint';
 import { Box3, Euler, Matrix4, Ray, Triangle, Vector3 } from 'three';
 import { nearestPaletteIndex, type PaletteColor, type Rgba } from '../colorUtils';
@@ -10,10 +11,10 @@ const edgeKey = (a: number, b: number) => a < b ? `${a}:${b}` : `${b}:${a}`;
 
 // Split shared edges together, preserving the original surface and sharp edges.
 type RefinementPriority = (face: Face, vertices: number[]) => [number, number, number];
-export function refineMesh(source: MeshData, target: number, budget = 400_000, priority?: RefinementPriority, capturePaint = false) {
+export function refineMesh(source: MeshData, target: number, budget = 400_000, priority?: RefinementPriority, capturePaint = false, initialForest?: PaintForest) {
   const vertices = source.vertices.slice();
-  const nodes: PaintNode[] = capturePaint ? source.triangles.map(face => ({ split: 0, side: 0, children: [], materialIndex: face.materialIndex })) : [];
-  let triangles = capturePaint ? source.triangles.map((face, paintNode) => ({ ...face, paintNode })) : source.triangles;
+  const nodes: PaintNode[] = initialForest?.nodes ?? (capturePaint ? source.triangles.map(face => ({ split: 0, side: 0, children: [], materialIndex: face.materialIndex })) : []);
+  let triangles = capturePaint && !initialForest ? source.triangles.map((face, paintNode) => ({ ...face, paintNode })) : source.triangles;
   let limited = false;
   for (let pass = 0; pass < 16; pass++) {
     const marked = new Map<string, { a: number; b: number; score: number; cost: number }>();
@@ -89,7 +90,7 @@ export function refineMesh(source: MeshData, target: number, budget = 400_000, p
     triangles = next;
     if (pass === 15) limited = true;
   }
-  const paintForest: PaintForest | undefined = capturePaint ? { original: source, nodes } : undefined;
+  const paintForest: PaintForest | undefined = capturePaint ? { original: initialForest?.original ?? source, nodes } : undefined;
   return { mesh: { ...source, vertices, triangles }, limited, paintForest };
 }
 
@@ -128,6 +129,10 @@ export type ProjectionRequest = {
 
 export function projectModel({ source, settings, mapping, pixels, palette, baseIndex, refinement, paintEncoding, layers = [] }: ProjectionRequest) {
   const original = transformModel(source, settings);
+  const imported = source.extruderSetup ? decodePaint(original) : null;
+  if (imported && !pixels && !layers.length) {
+    return { mesh: { ...original, paintLeafCount: imported.mesh.triangles.length, paintPreview: { vertices: imported.mesh.vertices, triangles: imported.mesh.triangles } }, limited: false, painted: imported.mesh.triangles.length, paintForest: undefined };
+  }
   const size = meshBounds(original).getSize(new Vector3());
   const maxSize = Math.max(size.x, size.y, size.z, 0.001);
   const base = palette[baseIndex];
@@ -217,7 +222,7 @@ export function projectModel({ source, settings, mapping, pixels, palette, baseI
     }
     return scores;
   };
-  const refined = contexts.length ? refineMesh(original, maxSize / 64, refinement?.budget ?? 400_000, priority, paintEncoding === 'subtriangle') : { mesh: original, limited: false, paintForest: undefined };
+  const refined = contexts.length ? refineMesh(imported?.mesh ?? original, maxSize / 64, refinement?.budget ?? 400_000, priority, paintEncoding === 'subtriangle' || Boolean(imported), imported?.forest) : { mesh: original, limited: false, paintForest: undefined };
   const mesh = refined.mesh;
   let painted = 0;
   const triangles = mesh.triangles.map(face => {
@@ -225,7 +230,8 @@ export function projectModel({ source, settings, mapping, pixels, palette, baseI
     triangle.b.fromArray(mesh.vertices, face.b * 3);
     triangle.c.fromArray(mesh.vertices, face.c * 3);
     triangle.getMidpoint(center); triangle.getNormal(normal);
-    let color = { r: base.r, g: base.g, b: base.b };
+    const underlying = imported ? palette[face.materialIndex] : base;
+    let color = { r: underlying.r, g: underlying.g, b: underlying.b };
     let projectionRegion: 0 | 1 = 0;
     for (const context of contexts) {
       const pixel = context.sample(center, normal);
@@ -234,7 +240,7 @@ export function projectModel({ source, settings, mapping, pixels, palette, baseI
       const alpha = (pixel.a ?? 255) / 255;
       color = { r: Math.round(pixel.r * alpha + color.r * (1 - alpha)), g: Math.round(pixel.g * alpha + color.g * (1 - alpha)), b: Math.round(pixel.b * alpha + color.b * (1 - alpha)) };
     }
-    let materialIndex = baseIndex;
+    let materialIndex = imported ? face.materialIndex : baseIndex;
     if (projectionRegion) {
       const key = color.r * 65536 + color.g * 256 + color.b;
       let index = colorCache.get(key);

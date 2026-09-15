@@ -42,7 +42,7 @@ export function CustomModelControls({ model, settings, loading, error, onLoad, o
       <label className="field"><span>Image detail</span><select value={settings.detail} onChange={e => patch({ detail: e.target.value as CustomSettings['detail'] })}>
         <option value="standard">Standard</option><option value="fine">Fine</option>
       </select></label>
-      <p className="helper-copy">The preview shows the export colors. Imported paint and print settings are replaced by this project’s palette. Relief is available for simple shapes.</p>
+      <p className="helper-copy">{model.extruderSetup ? 'Imported MMU painting and extruders are preserved. New images paint over the existing colors.' : 'Compatible 3MF painting can be imported when prompted. Other print settings are not imported.'} Use Preview export to check final detail. Relief is available for simple shapes.</p>
     </>}
   </div>;
 }

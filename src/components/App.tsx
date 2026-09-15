@@ -1,3 +1,4 @@
+import { withoutImportedPaint } from '../lib/geometry/prusaExtruders';
 import type { ProjectionLayer } from '../lib/geometry/projectModel';
 import { defaultCustomExportSettings, useCustomExport, type CustomExportSettings, type PreparedModel } from '../lib/geometry/useCustomExport';
 import { CustomModelControls } from './CustomModelControls';
@@ -117,13 +118,14 @@ export default function App() {
   const [activeTexture, setActiveTexture] = useState(true);
   const [exportTarget, setExportTarget] = useState<'current' | 'baked'>('current');
   const bakedCache = useRef<{ layers: ProjectionLayer[]; result: PreparedModel; title: string; settings: CustomSettings } | null>(null);
-  const paletteLocked = bakedLayers.length > 0;
   const [customExportSettings, setCustomExportSettings] = useState(defaultCustomExportSettings);
   const [showingExportPreview, setShowingExportPreview] = useState(false);
   const { preparing: preparingExport, prepare: prepareCustomExport, cancel: cancelExportPreparation } = useCustomExport();
   const preparedExport = useRef<{ key: object; result: PreparedModel } | null>(null);
   const [modelSource, setModelSource] = useState<ModelSource>('simple');
   const [customModel, setCustomModel] = useState<MeshData | null>(null);
+  const importedPainting = Boolean(customModel?.extruderSetup);
+  const paletteLocked = bakedLayers.length > 0 || importedPainting;
   const [customSettings, setCustomSettings] = useState<CustomSettings>(defaultCustomSettings);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -153,8 +155,8 @@ export default function App() {
 
   const processedCanvas = useMemo(() => (imageCanvas ? createProcessedCanvas(imageCanvas, relief.blurPx) : null), [imageCanvas, relief.blurPx]);
   const processedPixels = useMemo(() => processedCanvas?.getContext('2d', { willReadFrequently: true })?.getImageData(0, 0, processedCanvas.width, processedCanvas.height) ?? null, [processedCanvas]);
-  const colorMixPalette = useMemo(() => buildColorMixPalette(colorMixFilaments), [colorMixFilaments]);
-  const effectivePalette = colorMixEnabled ? colorMixPalette : palette;
+  const colorMixPalette = useMemo(() => customModel?.extruderSetup ? customModel.materials : buildColorMixPalette(colorMixFilaments), [colorMixFilaments, customModel]);
+  const effectivePalette = customModel?.extruderSetup ? customModel.materials : colorMixEnabled ? colorMixPalette : palette;
   const insideMaterialLimit = colorMixEnabled ? colorMixFilaments.length : effectivePalette.length;
   const effectiveInsideMaterialIndex = Math.max(0, Math.min(Math.max(0, insideMaterialLimit - 1), insideMaterialIndex));
   const padColor = effectivePalette[effectiveInsideMaterialIndex] ?? fallbackPalette[0];
@@ -246,15 +248,28 @@ export default function App() {
     setModelError(null);
     try {
       const { importModel } = await import('../lib/geometry/importModel');
-      const imported = await importModel(file);
+      const imported = await importModel(file, { detectPainting: true });
       if (sequence !== importSequence.current) return;
+      const includePainting = Boolean(imported.extruderSetup) && window.confirm('The 3MF file includes multimaterial painting. Do you want to import it?');
+      const model = includePainting ? imported : imported.extruderSetup ? withoutImportedPaint(imported) : imported;
       pushUndo();
       setBakedLayers([]);
       setBakedRecipe(null);
       bakedCache.current = null;
-      setActiveTexture(true);
+      setActiveTexture(!imported.extruderSetup && !imported.paintingWarning);
       setExportTarget('current');
-      setCustomModel(imported);
+      setCustomModel(model);
+      setModelError(imported.paintingWarning ?? null);
+      if (includePainting) {
+        const physical = imported.extruderSetup!.physicalExtruders;
+        setColorMixFilaments(physical);
+        setPalette(imported.materials);
+        setColorMixEnabled(imported.materials.length > physical.length);
+        setInsideMaterialIndex(0);
+        setLockManualPalette(true);
+        setCustomExportSettings(current => ({ ...current, encoding: 'subtriangle' }));
+        setBakedRecipe({ settings: defaultCustomSettings, exportSettings: { ...customExportSettings, encoding: 'subtriangle' }, extraDetail: false, cleanup: false, title: imported.name });
+      }
       setCustomSettings(defaultCustomSettings);
       setModelSource('custom');
       setMapping(current => ({ ...current, fitMode: 'contain', repeatX: false, repeatY: false, scale: 1, offsetU: 0, offsetV: 0 }));
@@ -264,7 +279,7 @@ export default function App() {
     } finally {
       if (sequence === importSequence.current) setModelLoading(false);
     }
-  }, [pushUndo]);
+  }, [pushUndo, customExportSettings]);
 
   const commitMapping = useCallback((next: ImageMappingSettings) => {
     pushUndo();
@@ -328,17 +343,18 @@ export default function App() {
           heightSegments: Math.min(1024, Math.round(shape.heightSegments * 2)),
         }
       : shape;
+    const withExtruders = (result: MeshData) => ({ ...result, extruderSetup: customModel?.extruderSetup });
     switch (nextShape.type) {
       case 'cylinder':
-        return generateCylinder(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
+        return withExtruders(generateCylinder(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex));
       case 'vase':
-        return generateVase(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
+        return withExtruders(generateVase(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex));
       case 'plane':
-        return generatePlane(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
+        return withExtruders(generatePlane(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex));
       case 'arc':
-        return generateArc(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex);
+        return withExtruders(generateArc(nextShape, sampler, relief, effectivePalette, effectiveInsideMaterialIndex));
     }
-  }, [effectiveInsideMaterialIndex, effectivePalette, mapping, padColor, processedCanvas, relief, shape]);
+  }, [customModel, effectiveInsideMaterialIndex, effectivePalette, mapping, padColor, processedCanvas, relief, shape]);
 
   useEffect(() => {
     preparedExport.current = null;
@@ -351,7 +367,7 @@ export default function App() {
         setMesh(cached.result.mesh);
         setMeshValidation(cached.result.validation);
         setIsBuilding(false);
-        setStatus(`${bakedLayers.length} textures baked. Load another image or project this image from a new view.`);
+        setStatus(bakedLayers.length ? `${bakedLayers.length} textures baked. Load another image or project this image from a new view.` : 'Imported MMU painting ready. Add an image to paint over it.');
         return;
       }
       setIsBuilding(true);
@@ -363,7 +379,7 @@ export default function App() {
         if (data.error) { setMesh(null); setStatus(data.error); return; }
         setMesh(data.mesh);
         setMeshValidation(data.validation);
-        setStatus(!processedCanvas && !bakedLayers.length ? 'Model ready. Add an image to paint it.' : data.limited
+        setStatus(importedPainting && !activeTexture && !bakedLayers.length ? 'Imported MMU painting ready. Add an image to paint over it.' : !processedCanvas && !bakedLayers.length ? 'Model ready. Add an image to paint it.' : data.limited
           ? `Preview ready. ${customExportSettings.encoding === 'subtriangle' ? 'Paint sampling' : 'Triangle'} budget reached; use export detail for finer colors.`
           : data.painted === 0 ? 'No image colors visible. Adjust placement or choose Project from view.'
           : 'Preview ready. Use Preview export to check extra detail and cleanup.');
@@ -451,7 +467,7 @@ export default function App() {
 
   const prepareExportModel = async (target: 'current' | 'baked' = 'current'): Promise<PreparedModel> => {
     if (!customModel) throw new Error('Load a custom model first.');
-    if (target === 'baked' && !bakedLayers.length) throw new Error('Bake a texture first.');
+    if (target === 'baked' && !bakedLayers.length && !importedPainting) throw new Error('Bake a texture first.');
     if (target === 'baked' && bakedCache.current?.layers === bakedLayers) return bakedCache.current.result;
     if (target === 'current' && preparedExport.current?.key === exportKey) return preparedExport.current.result;
     const recipe = target === 'baked' ? bakedRecipe : null;
@@ -506,7 +522,15 @@ export default function App() {
     bakedCache.current = null;
     setActiveTexture(true);
     setExportTarget('current');
-    setStatus('Baked textures cleared. Filament mapping is unlocked.');
+    if (customModel?.extruderSetup) {
+      setCustomModel(withoutImportedPaint(customModel));
+      setColorMixEnabled(true);
+      setColorMixFilaments(defaultColorMixFilaments());
+      setPalette(fallbackPalette);
+      setLockManualPalette(false);
+      setInsideMaterialIndex(3);
+    }
+    setStatus('Painting cleared. Filament mapping is unlocked.');
   };
 
   const handlePreviewExport = async () => {
@@ -555,6 +579,7 @@ export default function App() {
     setActiveTexture(true);
     setExportTarget('current');
     setModelSource('simple');
+    setCustomModel(current => current?.extruderSetup ? withoutImportedPaint(current) : current);
     setCustomSettings(defaultCustomSettings);
     setCustomExportSettings(defaultCustomExportSettings);
     setShowingExportPreview(false);
@@ -609,9 +634,10 @@ export default function App() {
         <ShapeControls source={modelSource} onSourceChange={changeModelSource}
           customControls={<CustomModelControls model={customModel} settings={customSettings} loading={modelLoading} error={modelError} onLoad={loadModel} onChange={commitCustomSettings} />}
           settings={shape} imageAspectRatio={imageAspectRatio} onChange={commitShape} />
-        {paletteLocked && <p className="helper-copy">Filament mapping is locked while textures are baked. Clear baked textures in the projection menu to change it. Bakes are kept in this tab until reload.</p>}
-        <fieldset className="palette-lock" disabled={paletteLocked}>
+        {paletteLocked && <p className="helper-copy">{importedPainting ? 'The imported physical and virtual extruders are preserved. Use Clear all painting to unlock the filament setup.' : 'Filament mapping is locked while textures are baked. Clear baked textures in the projection menu to change it.'} Painting is kept in this tab until reload.</p>}
+        <fieldset className={`palette-lock${importedPainting ? ' imported-palette' : ''}`} disabled={paletteLocked}>
         <PaletteControls
+          importedSetup={customModel?.extruderSetup} importedMaterials={customModel?.materials}
           colorCount={colorCount}
           palette={palette}
           colorMixEnabled={colorMixEnabled}
@@ -642,9 +668,9 @@ export default function App() {
       </aside>
       <section className="work-area">
         <Preview3D mesh={mesh} customSettings={modelSource === 'custom' ? customSettings : undefined}
-          imageAspect={imageAspectRatio} mapping={mapping} onBake={handleBake} onClearBaked={clearBakedTextures} bakedCount={bakedLayers.length} canBake={Boolean(processedCanvas && activeTexture && !(showingExportPreview && exportTarget === 'baked'))} activeTexture={activeTexture && !(showingExportPreview && exportTarget === 'baked')} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading || preparingExport || isExporting} />
+          imageAspect={imageAspectRatio} mapping={mapping} onBake={handleBake} onClearBaked={clearBakedTextures} bakedCount={bakedLayers.length} importedPainting={importedPainting} canBake={Boolean(processedCanvas && activeTexture && !(showingExportPreview && exportTarget === 'baked'))} activeTexture={activeTexture && !(showingExportPreview && exportTarget === 'baked')} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading || preparingExport || isExporting} />
         <ExportPanel
-          exportTarget={exportTarget} onExportTargetChange={setExportTarget} hasBakedTexture={bakedLayers.length > 0}
+          exportTarget={exportTarget} onExportTargetChange={setExportTarget} hasBakedTexture={bakedLayers.length > 0 || importedPainting} importedPainting={importedPainting}
           customModel={modelSource === 'custom'}
           customSettings={customExportSettings}
           onCustomSettingsChange={next => { pushUndo(); setCustomExportSettings(next); }}

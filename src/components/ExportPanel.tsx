@@ -2,6 +2,7 @@ import type { CustomExportSettings } from '../lib/geometry/useCustomExport';
 
 type Props = {
   customModel?: boolean;
+  importedPainting?: boolean;
   exportTarget: 'current' | 'baked';
   onExportTargetChange: (target: 'current' | 'baked') => void;
   hasBakedTexture: boolean;
@@ -27,7 +28,7 @@ type Props = {
 };
 
 export function ExportPanel({
-  customModel, exportTarget, onExportTargetChange, hasBakedTexture,
+  customModel, importedPainting, exportTarget, onExportTargetChange, hasBakedTexture,
   customSettings,
   onCustomSettingsChange,
   onPreviewExport,
@@ -61,9 +62,9 @@ export function ExportPanel({
           <option value="current">Export current preview</option>
           <option value="baked" disabled={!hasBakedTexture}>Export last baked texture</option>
         </select></label>}
-        {customModel && exportTarget === 'baked' && <span className="helper-copy">Exports the cached result of the last bake, including all earlier textures. Unbaked edits and changes to export settings are excluded.</span>}
+        {customModel && exportTarget === 'baked' && <span className="helper-copy">Exports the last baked result, including earlier textures and any imported painting. Unbaked edits and changes to export settings are excluded.</span>}
 
-        {customModel && <label className="field"><span>Color storage</span><select disabled={isExporting || preparingExport || customModel && exportTarget === 'baked'} value={customSettings.encoding} onChange={e => onCustomSettingsChange({ ...customSettings, encoding: e.target.value as CustomExportSettings['encoding'] })}>
+        {customModel && <label className="field"><span>Color storage</span><select disabled={isExporting || preparingExport || importedPainting || customModel && exportTarget === 'baked'} value={customSettings.encoding} onChange={e => onCustomSettingsChange({ ...customSettings, encoding: e.target.value as CustomExportSettings['encoding'] })}>
           <option value="subtriangle">PrusaSlicer paint · original mesh</option><option value="geometry">Subdivided mesh · legacy</option>
         </select></label>}
         <label className="check-row"><input type="checkbox" disabled={isExporting || preparingExport || customModel && exportTarget === 'baked'} checked={triangulateBeforeExport} onChange={(event) => onTriangulateBeforeExportChange(event.target.checked)} /> {customModel && customSettings.encoding === 'subtriangle' ? 'Extra paint detail on export' : 'Triangulate detail on export'}</label>

@@ -15,6 +15,7 @@ type Props = {
   onBake: () => void;
   onClearBaked: () => void;
   bakedCount: number;
+  importedPainting?: boolean;
   canBake: boolean;
   activeTexture: boolean;
 };
@@ -71,7 +72,7 @@ function fitCameraToBounds(camera: THREE.OrthographicCamera, bounds: MeshBounds,
   camera.updateProjectionMatrix();
 }
 
-export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappingChange, onProjectionChange, busy, onBake, onClearBaked, bakedCount, canBake, activeTexture }: Props) {
+export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappingChange, onProjectionChange, busy, onBake, onClearBaked, bakedCount, canBake, activeTexture, importedPainting }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -340,10 +341,11 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
         </>}
         {imageAspect && <label className="check-row">Image size <input aria-label="Preview image size" disabled={busy} type="range" min="0.25" max="3" step="0.01" value={mapping.scale} onChange={e => onMappingChange({ ...mapping, scale: Number(e.target.value) })} /></label>}
         <button type="button" disabled={busy || !canBake} onClick={onBake}>Bake current texture</button>
+        {importedPainting && <span>Imported MMU painting</span>}
         {bakedCount > 0 && <>
           <span>{bakedCount} baked {bakedCount === 1 ? 'texture' : 'textures'}</span>
-          <button type="button" disabled={busy} onClick={onClearBaked}>Clear baked textures</button>
         </>}
+        {(bakedCount > 0 || importedPainting) && <button type="button" disabled={busy} onClick={onClearBaked}>{importedPainting ? 'Clear all painting' : 'Clear baked textures'}</button>}
         <label className="check-row"><input type="checkbox" checked={shaded} onChange={e => setShaded(e.target.checked)} /> Shape shading</label>
         <span className="helper-copy">{busy ? 'Updating preview...' : !activeTexture && bakedCount ? 'Texture baked. Project this image from another view, adjust placement, or choose a new image.' : moveImage ? 'Drag to move the image; release to update colors.' : customSettings.projection === 'cylindrical' ? 'Wrap around Y: adjust scale and offsets in Image.' : 'Orbit to a side, then project. Placement stays fixed as you orbit.'}</span>
       </div>}

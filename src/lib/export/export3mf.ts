@@ -106,6 +106,7 @@ function averageHexColor(left: string, right: string): string {
 }
 
 function prusaFullSpectrumJson(mesh: MeshData): string {
+  if (mesh.extruderSetup) return mesh.extruderSetup.fullSpectrum;
   const colorMixPhysicalCount = getColorMixPhysicalCount(mesh);
   const physicalCount = colorMixPhysicalCount ?? Math.max(2, getMaxUsedMaterialCount(mesh));
   const physicalExtruders = Array.from({ length: physicalCount }, (_, index) => ({
@@ -149,7 +150,7 @@ function modelXml(mesh: MeshData): string {
   }
   const triangles = mesh.triangles.map((triangle) => {
     const materialIndex = Math.max(0, Math.min(mesh.materials.length - 1, triangle.materialIndex));
-    const prusaState = triangle.prusaPaint ?? encodePrusaTriangleState(materialIndex + 1);
+    const prusaState = triangle.prusaPaint ?? encodePrusaTriangleState(mesh.materials[materialIndex]?.extruderId ?? materialIndex + 1);
     return `<triangle v1="${triangle.a}" v2="${triangle.b}" v3="${triangle.c}" slic3rpe:mmu_segmentation="${prusaState}" />`;
   }).join('');
 

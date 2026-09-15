@@ -1,3 +1,5 @@
+import { readPrusaExtruders, withoutImportedPaint } from './prusaExtruders';
+import { mirrorPaintTree, resolveDefaultPaint, validatePaint } from './readPrusaPaint';
 import JSZip from 'jszip';
 import { BufferGeometry, Matrix4, Mesh, Vector3 } from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
@@ -22,15 +24,18 @@ function transform(value: string | null): Matrix4 {
   return new Matrix4().set(n[0], n[3], n[6], n[9], n[1], n[4], n[7], n[10], n[2], n[5], n[8], n[11], 0, 0, 0, 1);
 }
 
-// Imports geometry only. Existing paint, textures, supports and printer settings are not applied.
-export async function importModel(file: File): Promise<MeshData> {
+// Geometry-only by default. The UI opts into paint detection before asking the user.
+export async function importModel(file: File, options: { detectPainting?: boolean } = {}): Promise<MeshData & { paintingWarning?: string }> {
   if (file.size > 80 * 1024 * 1024) throw new Error('Choose a model smaller than 80 MB.');
   const extension = file.name.split('.').pop()?.toLowerCase();
   const vertices: number[] = [];
   const triangles: MeshData['triangles'] = [];
   const point = new Vector3();
   let part = 0;
-  const append = (positions: ArrayLike<number>, indices: ArrayLike<number> | null, matrix: Matrix4) => {
+  let paintZip: JSZip | null = null;
+  let paintingWarning: string | undefined;
+  let hasPainting = false;
+  const append = (positions: ArrayLike<number>, indices: ArrayLike<number> | null, matrix: Matrix4, paint?: Array<{ text: string; baseId: number }>) => {
     const count = indices?.length ?? positions.length / 3;
     if (count % 3) throw new Error('Model contains incomplete triangle data.');
     if (triangles.length + count / 3 > MAX_TRIANGLES) throw new Error(`Model exceeds ${MAX_TRIANGLES.toLocaleString('en-US')} triangles. Simplify it before importing.`);
@@ -54,7 +59,15 @@ export async function importModel(file: File): Promise<MeshData> {
       const key = [...ids].sort((a, b) => a - b).join(',');
       if (seen.has(key)) continue;
       seen.add(key);
-      triangles.push({ a: ids[0], b: ids[mirrored ? 2 : 1], c: ids[mirrored ? 1 : 2], materialIndex: 0 });
+      const annotation = paint?.[i / 3];
+      let prusaPaint = annotation?.text;
+      if (annotation) try { prusaPaint = resolveDefaultPaint(annotation.text, annotation.baseId); }
+      catch (error) { paintingWarning = error instanceof Error ? error.message : 'Invalid painting.'; }
+      if (prusaPaint && mirrored) {
+        try { prusaPaint = mirrorPaintTree(prusaPaint); }
+        catch (error) { paintingWarning = error instanceof Error ? error.message : 'Invalid mirrored painting.'; }
+      }
+      triangles.push({ a: ids[0], b: ids[mirrored ? 2 : 1], c: ids[mirrored ? 1 : 2], materialIndex: annotation ? annotation.baseId - 1 : 0, prusaPaint });
     }
     part++;
   };
@@ -78,6 +91,12 @@ export async function importModel(file: File): Promise<MeshData> {
     });
   } else if (extension === '3mf') {
     const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    if (options.detectPainting) paintZip = zip;
+    let modelConfig: Element | undefined;
+    if (options.detectPainting) {
+      const config = await zip.file('Metadata/Slic3r_PE_model.config')?.async('string');
+      if (config) try { modelConfig = xml(config); } catch { paintingWarning = 'Invalid model paint settings.'; }
+    }
     const normalize = (path: string, from = '') => {
       const parts: string[] = [];
       const combined = path.startsWith('/') ? path : `${from.slice(0, from.lastIndexOf('/') + 1)}${path}`;
@@ -116,8 +135,27 @@ export async function importModel(file: File): Promise<MeshData> {
       if (mesh) {
         const vs = child(mesh, 'vertices'); const ts = child(mesh, 'triangles');
         if (!vs || !ts) throw new Error('Incomplete 3MF mesh.');
+        const faces = children(ts, 'triangle');
+        let paint: Array<{ text: string; baseId: number }> | undefined;
+        if (options.detectPainting) {
+          const paintVersion = children(root, 'metadata').find(m => m.getAttribute('name')?.endsWith(':MmPaintingVersion'))?.textContent;
+          if (paintVersion && Number(paintVersion) > 2) paintingWarning = 'Unsupported MMU painting version.';
+          const objectConfig = path === rootPath && modelConfig ? children(modelConfig, 'object').find(o => o.getAttribute('id') === id) : undefined;
+          const extruder = (node: Element | undefined, fallback: number) => {
+            const value = node && children(node, 'metadata').find(m => m.getAttribute('key') === 'extruder')?.getAttribute('value');
+            return value && Number(value) > 0 ? Number(value) : fallback;
+          };
+          const baseId = extruder(objectConfig, 1);
+          const volumes = objectConfig ? children(objectConfig, 'volume') : [];
+          paint = faces.map((face, i) => {
+            const text = face.getAttributeNS('http://schemas.slic3r.org/3mf/2017/06', 'mmu_segmentation') ?? '';
+            if (text && text !== '0') hasPainting = true;
+            const volume = volumes.find(v => i >= Number(v.getAttribute('firstid')) && i <= Number(v.getAttribute('lastid')));
+            return { text: text || '0', baseId: extruder(volume, baseId) };
+          });
+        }
         append(children(vs, 'vertex').flatMap(v => ['x', 'y', 'z'].map(k => Number(v.getAttribute(k) ?? NaN))),
-          children(ts, 'triangle').flatMap(t => ['v1', 'v2', 'v3'].map(k => Number(t.getAttribute(k) ?? NaN))), parent);
+          faces.flatMap(t => ['v1', 'v2', 'v3'].map(k => Number(t.getAttribute(k) ?? NaN))), parent, paint);
       }
       const components = child(object, 'components');
       if (!mesh && !components) throw new Error('This 3MF contains an object without a supported triangle mesh.');
@@ -143,5 +181,23 @@ export async function importModel(file: File): Promise<MeshData> {
     }
   } else throw new Error('Choose an STL, 3MF, or OBJ file.');
   if (!part || !triangles.length) throw new Error('The file contains no triangle geometry.');
-  return { name: file.name.replace(/\.[^.]+$/, ''), vertices, triangles, materials: [], preserveTopology: true };
+  const model: MeshData = { name: file.name.replace(/\.[^.]+$/, ''), vertices, triangles, materials: [], preserveTopology: true };
+  if (paintZip && hasPainting) {
+    try {
+      if (paintingWarning) throw new Error(paintingWarning);
+      const { materials, setup } = await readPrusaExtruders(paintZip);
+      model.materials = materials;
+      model.extruderSetup = setup;
+      for (const face of model.triangles) {
+        const index = materials.findIndex(m => m.extruderId === face.materialIndex + 1);
+        if (index < 0) throw new Error('Missing default extruder for a model part.');
+        face.materialIndex = index;
+      }
+      validatePaint(model);
+      return model;
+    } catch (error) {
+      return { ...withoutImportedPaint(model), paintingWarning: `Existing painting could not be imported: ${error instanceof Error ? error.message : 'Unsupported paint data.'} Loaded blank geometry.` };
+    }
+  }
+  return options.detectPainting ? withoutImportedPaint(model) : model;
 }

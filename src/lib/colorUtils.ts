@@ -1,6 +1,7 @@
 export type Rgba = { r: number; g: number; b: number; a?: number };
 
 export type PaletteColor = {
+  extruderId?: number;
   id: string;
   name: string;
   r: number;
