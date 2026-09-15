@@ -132,3 +132,95 @@ export function cleanupSmallColorIslands(mesh: MeshData, maxTriangles: number): 
     replacedTriangleCount,
   };
 }
+
+// Imported meshes have uneven triangle sizes. Measure islands in mm² and never
+// move color across the image/visibility mask. Typed adjacency keeps large exports manageable.
+export function cleanupColorIslandsByArea(mesh: MeshData, maxAreaMm2: number): ColorIslandCleanupResult {
+  const unchanged = { mesh, replacedIslandCount: 0, replacedTriangleCount: 0 };
+  if (!(maxAreaMm2 > 0) || !Number.isFinite(maxAreaMm2)) return unchanged;
+  const count = mesh.triangles.length;
+  const neighbors = new Int32Array(count * 3).fill(-1);
+  const owners = new Map<number, number>();
+  const vertexCount = mesh.vertices.length / 3;
+  mesh.triangles.forEach((face, index) => {
+    const ids = [face.a, face.b, face.c];
+    for (let i = 0; i < 3; i++) {
+      const a = ids[i], b = ids[(i + 1) % 3];
+      const key = Math.min(a, b) * vertexCount + Math.max(a, b);
+      const slot = index * 3 + i;
+      const other = owners.get(key);
+      if (other === undefined) owners.set(key, slot);
+      else if (other >= 0) {
+        if (neighbors[other] >= 0) {
+          // Do not propagate paint through a non-manifold edge.
+          neighbors[neighbors[other]] = -1; neighbors[other] = -1; owners.set(key, -1);
+        } else { neighbors[slot] = other; neighbors[other] = slot; }
+      }
+    }
+  });
+  owners.clear();
+  const labels = new Int32Array(count).fill(-1);
+  const areas: number[] = [];
+  const materials: number[] = [];
+  const sizes: number[] = [];
+  const v = mesh.vertices;
+  for (let start = 0; start < count; start++) {
+    if (labels[start] !== -1 || mesh.triangles[start].projectionRegion !== 1) continue;
+    const label = areas.length;
+    const material = mesh.triangles[start].materialIndex;
+    const stack = [start];
+    labels[start] = label;
+    let area = 0, size = 0;
+    while (stack.length) {
+      const index = stack.pop()!;
+      size++;
+      const face = mesh.triangles[index];
+      const a = face.a * 3, b = face.b * 3, c = face.c * 3;
+      const ux = v[b]-v[a], uy = v[b+1]-v[a+1], uz = v[b+2]-v[a+2];
+      const vx = v[c]-v[a], vy = v[c+1]-v[a+1], vz = v[c+2]-v[a+2];
+      area += Math.hypot(uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx) / 2;
+      for (let i = 0; i < 3; i++) {
+        const slot = neighbors[index * 3 + i];
+        if (slot < 0) continue;
+        const next = Math.floor(slot / 3);
+        if (labels[next] === -1 && mesh.triangles[next].projectionRegion === 1 && mesh.triangles[next].materialIndex === material) {
+          labels[next] = label; stack.push(next);
+        }
+      }
+    }
+    areas.push(area); materials.push(material); sizes.push(size);
+  }
+  const scores = new Map<number, Map<number, number>>();
+  mesh.triangles.forEach((face, index) => {
+    const label = labels[index];
+    if (label < 0 || areas[label] > maxAreaMm2) return;
+    const ids = [face.a, face.b, face.c];
+    for (let i = 0; i < 3; i++) {
+      const slot = neighbors[index * 3 + i];
+      if (slot < 0) continue;
+      const nextLabel = labels[Math.floor(slot / 3)];
+      // Merge only into stable, larger islands; avoid simultaneous color swaps.
+      if (nextLabel < 0 || areas[nextLabel] <= maxAreaMm2 || materials[nextLabel] === materials[label]) continue;
+      const a = ids[i] * 3, b = ids[(i + 1) % 3] * 3;
+      const length = Math.hypot(v[a]-v[b], v[a+1]-v[b+1], v[a+2]-v[b+2]);
+      let totals = scores.get(label);
+      if (!totals) { totals = new Map(); scores.set(label, totals); }
+      totals.set(materials[nextLabel], (totals.get(materials[nextLabel]) ?? 0) + length);
+    }
+  });
+  const replacements = new Map<number, number>();
+  let replacedTriangleCount = 0;
+  scores.forEach((totals, label) => {
+    let best = -1, bestScore = 0;
+    totals.forEach((score, material) => { if (score > bestScore) { best = material; bestScore = score; } });
+    if (best >= 0) { replacements.set(label, best); replacedTriangleCount += sizes[label]; }
+  });
+  if (!replacements.size) return unchanged;
+  return {
+    mesh: { ...mesh, triangles: mesh.triangles.map((face, index) => {
+      const materialIndex = replacements.get(labels[index]);
+      return materialIndex === undefined ? face : { ...face, materialIndex };
+    }) },
+    replacedIslandCount: replacements.size, replacedTriangleCount,
+  };
+}

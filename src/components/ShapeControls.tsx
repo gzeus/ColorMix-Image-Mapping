@@ -1,6 +1,11 @@
+import type { ReactNode } from 'react';
+import type { ModelSource } from '../lib/geometry/customModel';
 import type { ShapeSettings } from '../lib/geometry/meshTypes';
 
 type Props = {
+  source: ModelSource;
+  onSourceChange: (source: ModelSource) => void;
+  customControls: ReactNode;
   settings: ShapeSettings;
   imageAspectRatio: number | null;
   onChange: (settings: ShapeSettings) => void;
@@ -25,7 +30,7 @@ function diameterFor(heightMm: number, aspectRatio: number): number {
   return Math.max(5, (heightMm * aspectRatio) / Math.PI);
 }
 
-export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
+export function ShapeControls({ source, onSourceChange, customControls, settings, imageAspectRatio, onChange }: Props) {
   const aspectRatio = imageAspectRatio && imageAspectRatio > 0 ? imageAspectRatio : settings.widthMm / Math.max(1, settings.heightMm);
   const patch = (partial: Partial<ShapeSettings>) => onChange({ ...settings, ...partial });
   const fitPanelToImage = (type: 'plane' | 'arc') => {
@@ -115,6 +120,10 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
   return (
     <section className="panel-section">
       <h2>Shape</h2>
+      <label className="field"><span>Model source</span><select value={source} onChange={e => onSourceChange(e.target.value as ModelSource)}>
+        <option value="simple">Simple shapes</option><option value="custom">Custom STL / 3MF / OBJ (EXPERIMENTAL)</option>
+      </select></label>
+      {source === 'custom' ? customControls : <>
       <div className="segmented">
         <button type="button" className={settings.type === 'cylinder' ? 'active' : ''} onClick={() => patch({ type: 'cylinder' })}>Cylinder</button>
         <button type="button" className={settings.type === 'vase' ? 'active' : ''} onClick={() => patch({ type: 'vase' })}>Vase</button>
@@ -162,6 +171,7 @@ export function ShapeControls({ settings, imageAspectRatio, onChange }: Props) {
         </>
       ) : null}
       {settings.radialSegments * settings.heightSegments * 2 > 220000 ? <p className="warning">High triangle count may export slowly.</p> : null}
+      </>}
     </section>
   );
 }

@@ -2,13 +2,14 @@ import type { ChangeEvent } from 'react';
 import type { ImageMappingSettings } from '../lib/geometry/meshTypes';
 
 type Props = {
+  surfaceAspect?: number;
   mapping: ImageMappingSettings;
   mappedPreviewUrl: string | null;
   onImageChange: (file: File) => void;
   onMappingChange: (settings: ImageMappingSettings) => void;
 };
 
-export function ImageControls({ mapping, mappedPreviewUrl, onImageChange, onMappingChange }: Props) {
+export function ImageControls({ surfaceAspect, mapping, mappedPreviewUrl, onImageChange, onMappingChange }: Props) {
   const patch = (partial: Partial<ImageMappingSettings>) => onMappingChange({ ...mapping, ...partial });
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -28,7 +29,7 @@ export function ImageControls({ mapping, mappedPreviewUrl, onImageChange, onMapp
         </label>
       </div>
       <div className="image-strip">
-        {mappedPreviewUrl ? <img src={mappedPreviewUrl} alt="Mapped preview" /> : <div className="empty-preview">Mapping</div>}
+        {mappedPreviewUrl ? <img src={mappedPreviewUrl} alt="Mapped preview" style={surfaceAspect ? { aspectRatio: surfaceAspect, maxHeight: 260, objectFit: 'contain' } : undefined} /> : <div className="empty-preview">Mapping</div>}
       </div>
       <label className="field">
         <span>Fit</span>

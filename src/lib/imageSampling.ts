@@ -44,19 +44,19 @@ export function createProcessedCanvas(source: HTMLCanvasElement, blurPx: number)
   return canvas;
 }
 
-export function drawMappedImagePreview(source: HTMLCanvasElement | null, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel): HTMLCanvasElement | null {
+export function drawMappedImagePreview(source: HTMLCanvasElement | null, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel, surfaceAspect?: number): HTMLCanvasElement | null {
   if (!source) {
     return null;
   }
   const canvas = document.createElement('canvas');
   canvas.width = 320;
-  canvas.height = 180;
+  canvas.height = surfaceAspect ? Math.max(32, Math.min(640, Math.round(320 / surfaceAspect))) : 180;
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     return canvas;
   }
   const imageData = ctx.createImageData(canvas.width, canvas.height);
-  const sampler = makeImageSampler(source, settings, padColor);
+  const sampler = makeImageSampler(source, settings, padColor, surfaceAspect);
   for (let y = 0; y < canvas.height; y += 1) {
     for (let x = 0; x < canvas.width; x += 1) {
       const color = sampler(x / (canvas.width - 1), 1 - y / (canvas.height - 1));
@@ -71,21 +71,35 @@ export function drawMappedImagePreview(source: HTMLCanvasElement | null, setting
   return canvas;
 }
 
-export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel): (u: number, v: number) => Rgba {
+export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel, surfaceAspect?: number): (u: number, v: number) => Rgba {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx || canvas.width < 1 || canvas.height < 1) {
     return () => fallbackPixel;
   }
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  const imageAspect = canvas.width / canvas.height;
+  return makePixelSampler({ data, width: canvas.width, height: canvas.height }, settings, padColor, surfaceAspect);
+}
 
-  return (u: number, v: number): Rgba => {
+export type ImagePixels = { data: Uint8ClampedArray; width: number; height: number };
+
+export function makeImageCoordinateMapper(imageAspect: number, settings: ImageMappingSettings, surfaceAspect?: number) {
+
+  return (u: number, v: number) => {
     let mappedU = settings.mirrorX ? 1 - u : u;
     let mappedV = settings.flipY ? v : 1 - v;
     mappedU = (mappedU - 0.5) / settings.scale + 0.5 + settings.offsetU;
     mappedV = (mappedV - 0.5) / settings.scale + 0.5 + settings.offsetV;
 
-    if (settings.fitMode !== 'stretch') {
+    if (surfaceAspect !== undefined && settings.fitMode !== 'stretch') {
+      const ratio = imageAspect / surfaceAspect;
+      if (settings.fitMode === 'contain') {
+        if (ratio > 1) mappedV = (mappedV - 0.5) * ratio + 0.5;
+        else mappedU = (mappedU - 0.5) / ratio + 0.5;
+      } else {
+        if (ratio > 1) mappedU = (mappedU - 0.5) / ratio + 0.5;
+        else mappedV = (mappedV - 0.5) * ratio + 0.5;
+      }
+    } else if (settings.fitMode !== 'stretch') {
       const surfaceAspect = 1;
       const ratio = settings.fitMode === 'contain' ? Math.max(imageAspect / surfaceAspect, 1) : Math.min(imageAspect / surfaceAspect, 1);
       if (imageAspect >= surfaceAspect) {
@@ -95,6 +109,16 @@ export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSett
       }
     }
 
+    return { u: mappedU, v: mappedV };
+  };
+}
+
+export function makePixelSampler(canvas: ImagePixels, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel, surfaceAspect?: number): (u: number, v: number) => Rgba {
+  const data = canvas.data;
+  const coordinates = makeImageCoordinateMapper(canvas.width / canvas.height, settings, surfaceAspect);
+  return (u: number, v: number): Rgba => {
+    const mapped = coordinates(u, v);
+    let mappedU = mapped.u, mappedV = mapped.v;
     if (settings.repeatX) {
       mappedU = positiveModulo(mappedU, 1);
     } else if (mappedU < 0 || mappedU > 1) {
