@@ -50,6 +50,7 @@ export type TriangleData = {
   b: number;
   c: number;
   materialIndex: number;
+  projectionRegion?: 0 | 1;
   uvCenter?: { u: number; v: number };
 };
 

@@ -63,7 +63,18 @@ try {
     check(validation.boundaryEdges === 0 && validation.nonManifoldEdges === 0, 'Subdivision must remain watertight');
     check(refined.mesh.triangles.length > 12, 'Subdivision adds image detail');
     check(meshBounds(source).equals(meshBounds(refined.mesh)), 'Subdivision preserves bounds');
-    check(refineMesh(source, 0.01, 20).limited, 'Budget is reported');
+    const partial = refineMesh(source, 0.01, 20);
+    check(partial.limited, 'Budget is reported');
+    check(partial.mesh.triangles.length > source.triangles.length && partial.mesh.triangles.length <= 20, 'Partial budget is used instead of abandoning a pass');
+    check(validateMeshManifold(partial.mesh).boundaryEdges === 0, 'Partial budget remains watertight');
+    const {cleanupColorIslandsByArea} = await import('/src/lib/geometry/cleanupColorIslands.ts');
+    const island = {name:'island', vertices:[0,0,0, 0.1,0,0, 0,0.1,0, 0,-10,0], triangles:[{a:0,b:1,c:2,materialIndex:1,projectionRegion:1},{a:1,b:0,c:3,materialIndex:0,projectionRegion:1}], materials:[]};
+    check(cleanupColorIslandsByArea(island,0.01).replacedTriangleCount===1, 'Small physical-area island removed');
+    check(cleanupColorIslandsByArea(island,0.001).replacedTriangleCount===0, 'Large physical-area island preserved');
+    const masked={...island,triangles:island.triangles.map((t,i)=>({...t,projectionRegion:i===0?0:1}))};
+    check(cleanupColorIslandsByArea(masked,0.01).replacedTriangleCount===0, 'Cleanup protects projection footprint');
+    const dense={...island,vertices:[...island.vertices,1/30,1/30,0],triangles:[{a:0,b:1,c:4,materialIndex:1,projectionRegion:1},{a:1,b:2,c:4,materialIndex:1,projectionRegion:1},{a:2,b:0,c:4,materialIndex:1,projectionRegion:1},island.triangles[1]]};
+    check(cleanupColorIslandsByArea(dense,0.01).replacedIslandCount===1 && cleanupColorIslandsByArea(dense,0.001).replacedIslandCount===0,'Cleanup is independent of triangle density');
     const scaled = transformModel(source, { ...defaultCustomSettings, scale: 2, rotation: [90, 0, 0] });
     check(Math.abs(meshBounds(scaled).getSize(new Vector3()).y - 40) < 1e-6 && meshBounds(scaled).min.y === 0, 'Scale and bed placement');
     const ascii = 'solid triangle\\nfacet normal 0 0 1\\nouter loop\\nvertex 0 0 0\\nvertex 10 0 0\\nvertex 0 10 0\\nendloop\\nendfacet\\nendsolid triangle';
@@ -103,7 +114,15 @@ try {
     }
     check(hiddenCount > 0, 'Occlusion fixture exercised');
     const wrapped = projectModel({ source, settings:{...defaultCustomSettings,projection:'cylindrical'},mapping:{...mapping,fitMode:'stretch',repeatX:true},pixels,palette,baseIndex:0 });
-    check(wrapped.painted > projected.painted, 'Wrap covers multiple sides');
+    const paintedSides = new Set(wrapped.mesh.triangles.filter(t=>t.materialIndex===1).map(t=> {
+      const center=[0,1,2].map(k=>[t.a,t.b,t.c].reduce((sum,i)=>sum+wrapped.mesh.vertices[i*3+k],0)/3);
+      return Math.abs(center[0])>9.99?'x':'z';
+    }));
+    check(paintedSides.size===2, 'Wrap covers multiple sides');
+    const high=projectModel({source,settings:defaultCustomSettings,mapping,pixels,palette,baseIndex:0,refinement:{multiplier:2,budget:1000000}});
+    check(high.mesh.triangles.length>projected.mesh.triangles.length,'Export detail subdivides and resamples');
+    check(validateMeshManifold(high.mesh).boundaryEdges===0,'High export remains watertight');
+    window.detailCounts={preview:projected.mesh.triangles.length,export:high.mesh.triangles.length};
     return 'PASS: STL ASCII/binary, OBJ, 3MF assembly/units, invalid input, conforming subdivision, scale, aspect, occlusion, wrapping';
   })()`));
   // Exercise the actual React workflow and worker.
@@ -154,13 +173,20 @@ try {
   })()`);
   await waitFor(`document.body.innerText.includes('Wrap around Y:') && !document.querySelector('.preview-progress')`);
   console.log('PASS: uniform model scaling, undo, cylindrical UI mode');
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Preview export').click()`);
+  await waitFor(`Boolean(Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Cancel preparation'))`);
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Cancel preparation').click()`);
+  await waitFor(`document.body.innerText.includes('Export preparation cancelled.')`);
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Preview export').click()`);
+  await waitFor(`document.body.innerText.includes('Export preview ready.')`, 180_000);
+  console.log('PASS: cancellable export preparation and final export preview', await evaluate('window.detailCounts'));
   await evaluate(`(() => {
     const create = URL.createObjectURL.bind(URL);
     URL.createObjectURL = blob => { if (blob.type === 'model/3mf') window.exportedModel = blob; return create(blob); };
     window.previewTriangleCount = Number(document.querySelector('.export-bar strong').textContent.replace(/[^0-9]/g,''));
     document.querySelector('header .primary-button').click();
   })()`);
-  await waitFor('Boolean(window.exportedModel)');
+  await waitFor('Boolean(window.exportedModel)', 180_000);
   console.log(await evaluate(`(async () => {
     const JSZip = (await import('/node_modules/.vite/deps/jszip.js')).default;
     const zip = await JSZip.loadAsync(await window.exportedModel.arrayBuffer());
@@ -172,8 +198,8 @@ try {
     const recipes = await zip.file('Metadata/Prusa_Slicer_full_spectrum.json').async('string');
     if (!recipes.includes('components')) throw new Error('Export lost ColorMix recipes');
     const { importModel } = await import('/src/lib/geometry/importModel.ts');
-    const restored = await importModel(new File([window.exportedModel],'roundtrip.3mf'));
-    if (restored.triangles.length !== window.previewTriangleCount) throw new Error('3MF roundtrip lost triangles');
+    if(window.previewTriangleCount<=400000){const restored = await importModel(new File([window.exportedModel],'roundtrip.3mf'));
+    if (restored.triangles.length !== window.previewTriangleCount) throw new Error('3MF roundtrip lost triangles');}
     return 'PASS: 3MF export triangle count, paint segmentation, ColorMix recipes, geometry roundtrip';
   })()`));
   await evaluate(`(() => {

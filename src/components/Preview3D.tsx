@@ -79,8 +79,8 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
   const [showFrame, setShowFrame] = useState(true);
   const fitKeyRef = useRef('');
   const dragStateRef = useRef<{ start: THREE.Vector3; mapping: ImageMappingSettings; last: ImageMappingSettings } | null>(null);
-  const interactionRef = useRef({ mesh, customSettings, mapping, onMappingChange, moveImage });
-  interactionRef.current = { mesh, customSettings, mapping, onMappingChange, moveImage };
+  const interactionRef = useRef({ mesh, customSettings, mapping, onMappingChange, moveImage, busy });
+  interactionRef.current = { mesh, customSettings, mapping, onMappingChange, moveImage, busy };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -137,7 +137,7 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
     };
     const down = (event: PointerEvent) => {
       const current = interactionRef.current;
-      if (!current.moveImage || current.customSettings?.projection !== 'planar' || event.button !== 0) return;
+      if (current.busy || !current.moveImage || current.customSettings?.projection !== 'planar' || event.button !== 0) return;
       const projected = projectPointer(event);
       if (!projected) return;
       activeFrame = projected.frame;
@@ -332,7 +332,7 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
           }}>{moveImage ? 'Done moving' : 'Move image'}</button>
           <label className="check-row"><input type="checkbox" checked={showFrame} onChange={e => setShowFrame(e.target.checked)} /> Image frame</label>
         </>}
-        {imageAspect && <label className="check-row">Image size <input aria-label="Preview image size" type="range" min="0.25" max="3" step="0.01" value={mapping.scale} onChange={e => onMappingChange({ ...mapping, scale: Number(e.target.value) })} /></label>}
+        {imageAspect && <label className="check-row">Image size <input aria-label="Preview image size" disabled={busy} type="range" min="0.25" max="3" step="0.01" value={mapping.scale} onChange={e => onMappingChange({ ...mapping, scale: Number(e.target.value) })} /></label>}
         <label className="check-row"><input type="checkbox" checked={shaded} onChange={e => setShaded(e.target.checked)} /> Shape shading</label>
         <span className="helper-copy">{busy ? 'Updating preview...' : moveImage ? 'Drag to move the image; release to update colors.' : customSettings.projection === 'cylindrical' ? 'Wrap around Y: adjust scale and offsets in Image.' : 'Orbit to a side, then project. Placement stays fixed as you orbit.'}</span>
       </div>}

@@ -1,3 +1,4 @@
+import { defaultCustomExportSettings, useCustomExport, type CustomExportSettings, type PreparedModel } from '../lib/geometry/useCustomExport';
 import { CustomModelControls } from './CustomModelControls';
 import { projectionFrame, transformModel, defaultCustomSettings, type CustomSettings, type ModelSource } from '../lib/geometry/customModel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -41,6 +42,7 @@ const defaultRelief: ReliefSettings = { enabled: false, strengthMm: 0, invert: f
 const fallbackPalette = ['#f4efe5', '#263238', '#cf4b35', '#2e7d6f'].map((hex, index) => makePaletteColor(hex, index));
 
 type EditableSnapshot = {
+  customExportSettings: CustomExportSettings;
   modelSource: ModelSource;
   customModel: MeshData | null;
   customSettings: CustomSettings;
@@ -96,6 +98,10 @@ function safeFileNamePart(value: string): string {
 }
 
 export default function App() {
+  const [customExportSettings, setCustomExportSettings] = useState(defaultCustomExportSettings);
+  const [showingExportPreview, setShowingExportPreview] = useState(false);
+  const { preparing: preparingExport, prepare: prepareCustomExport, cancel: cancelExportPreparation } = useCustomExport();
+  const preparedExport = useRef<{ key: object; result: PreparedModel } | null>(null);
   const [modelSource, setModelSource] = useState<ModelSource>('simple');
   const [customModel, setCustomModel] = useState<MeshData | null>(null);
   const [customSettings, setCustomSettings] = useState<CustomSettings>(defaultCustomSettings);
@@ -131,6 +137,9 @@ export default function App() {
   const insideMaterialLimit = colorMixEnabled ? colorMixFilaments.length : effectivePalette.length;
   const effectiveInsideMaterialIndex = Math.max(0, Math.min(Math.max(0, insideMaterialLimit - 1), insideMaterialIndex));
   const padColor = effectivePalette[effectiveInsideMaterialIndex] ?? fallbackPalette[0];
+  const exportKey = useMemo(() => ({}), [customModel, customSettings, mapping, processedCanvas, effectivePalette, effectiveInsideMaterialIndex, customExportSettings, triangulateBeforeExport, cleanupColorIslands, modelSource]);
+  const latestExportKey = useRef(exportKey);
+  latestExportKey.current = exportKey;
   const customSurfaceAspect = useMemo(() => {
     if (modelSource !== 'custom' || !customModel) return undefined;
     const frame = projectionFrame(transformModel(customModel, customSettings), customSettings);
@@ -139,6 +148,7 @@ export default function App() {
   const imageAspectRatio = imageCanvas ? imageCanvas.width / Math.max(1, imageCanvas.height) : null;
 
   const snapshotEditableState = useCallback((): EditableSnapshot => ({
+    customExportSettings: { ...customExportSettings },
     modelSource, customModel, customSettings: { ...customSettings },
     mapping: { ...mapping },
     shape: { ...shape },
@@ -152,7 +162,7 @@ export default function App() {
     cleanupColorIslands,
     colorIslandMaxTriangles,
     triangulateBeforeExport,
-  }), [modelSource, customModel, customSettings, cleanupColorIslands, colorCount, colorIslandMaxTriangles, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
+  }), [customExportSettings, modelSource, customModel, customSettings, cleanupColorIslands, colorCount, colorIslandMaxTriangles, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
 
   const pushUndo = useCallback(() => {
     undoStack.current.push(snapshotEditableState());
@@ -168,6 +178,7 @@ export default function App() {
     }
     importSequence.current++;
     setModelLoading(false);
+    setCustomExportSettings(previous.customExportSettings);
     setModelSource(previous.modelSource);
     setCustomModel(previous.customModel);
     setCustomSettings(previous.customSettings);
@@ -294,6 +305,8 @@ export default function App() {
   }, [effectiveInsideMaterialIndex, effectivePalette, mapping, padColor, processedCanvas, relief, shape]);
 
   useEffect(() => {
+    preparedExport.current = null;
+    setShowingExportPreview(false);
     if (modelSource === 'custom') {
       setMeshValidation(null);
       if (!customModel) { setMesh(null); setIsBuilding(false); setStatus('Load an STL, 3MF, or OBJ model.'); return; }
@@ -309,7 +322,7 @@ export default function App() {
         setStatus(!processedCanvas ? 'Model ready. Add an image to paint it.' : data.limited
           ? 'Preview ready. Detail reached the triangle limit; some image features may be coarse.'
           : data.painted === 0 ? 'No image colors visible. Adjust placement or choose Project from view.'
-          : 'Preview ready. Export uses these exact triangle colors.');
+          : 'Preview ready. Use Preview export to check extra detail and cleanup.');
       };
       worker.onerror = () => { setMesh(null); setIsBuilding(false); setStatus('Model processing failed. Try a smaller model.'); };
       const timer = window.setTimeout(() => worker.postMessage({ source: customModel, settings: customSettings, mapping,
@@ -331,7 +344,7 @@ export default function App() {
       setStatus(nextMesh ? 'Preview ready. 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.' : 'Upload an image to generate the preview.');
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [buildMesh, effectivePalette, processedCanvas, modelSource, customModel, customSettings, mapping, effectiveInsideMaterialIndex]);
+  }, [buildMesh, effectivePalette, processedCanvas, modelSource, customModel, customSettings, mapping, effectiveInsideMaterialIndex, exportKey]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -389,34 +402,63 @@ export default function App() {
     };
   }, [loadImage, loadModel]);
 
-  const handleExport = async () => {
-    if (isBuilding || modelLoading) return;
-    const exportMesh = modelSource === 'custom' ? mesh : buildMesh(triangulateBeforeExport ? 'highExport' : 'export') ?? mesh;
-    if (!exportMesh) {
-      setStatus('Generate a mesh before exporting.');
-      return;
-    }
-    setIsExporting(true);
-    const exportName = `${safeFileNamePart(imageTitle)}_${modelSource === 'custom' ? safeFileNamePart(customModel?.name ?? 'model') : shape.type}`;
-    const cleanupResult = modelSource === 'simple' && cleanupColorIslands ? cleanupSmallColorIslands(exportMesh, colorIslandMaxTriangles) : null;
-    const namedExportMesh: MeshData = { ...(cleanupResult?.mesh ?? exportMesh), name: exportName };
-    const exportValidation = validateMeshManifold(namedExportMesh);
-    setStatus('Exporting 3MF...');
+  const prepareExportModel = async (): Promise<PreparedModel> => {
+    if (!customModel) throw new Error('Load a custom model first.');
+    if (preparedExport.current?.key === exportKey) return preparedExport.current.result;
+    const pixels = processedCanvas?.getContext('2d', { willReadFrequently: true })?.getImageData(0, 0, processedCanvas.width, processedCanvas.height);
+    setStatus('Preparing export detail and color cleanup...');
+    const result = await prepareCustomExport({
+      source: customModel, settings: customSettings, mapping,
+      pixels: pixels ? { data: pixels.data, width: pixels.width, height: pixels.height } : null,
+      palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex,
+      refinement: triangulateBeforeExport ? { multiplier: customExportSettings.multiplier, budget: customExportSettings.budget } : undefined,
+      cleanupAreaMm2: cleanupColorIslands ? customExportSettings.islandAreaMm2 : undefined,
+    });
+    if (latestExportKey.current !== exportKey) throw new Error('Settings changed. Prepare the export again.');
+    preparedExport.current = { key: exportKey, result };
+    return result;
+  };
+
+  const exportDetailStatus = (result: PreparedModel) => {
+    const cleanup = result.cleanup?.replacedIslandCount
+      ? ` Cleaned ${result.cleanup.replacedIslandCount} islands (${result.cleanup.replacedTriangleCount} triangles).`
+      : result.cleanup ? ' No small color islands found.' : '';
+    return `${result.mesh.triangles.length.toLocaleString()} triangles.${result.limited ? ' Triangle budget reached; some detail remains coarse.' : ''}${cleanup}`;
+  };
+
+  const handlePreviewExport = async () => {
+    if (isBuilding || modelLoading || isExporting || preparingExport) return;
     try {
+      const result = await prepareExportModel();
+      setMesh(result.mesh);
+      setMeshValidation(result.validation);
+      setShowingExportPreview(true);
+      setStatus(`Export preview ready. ${exportDetailStatus(result)}`);
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Export preview failed.'); }
+  };
+
+  const handleExport = async () => {
+    if (isBuilding || modelLoading || isExporting || preparingExport) return;
+    setIsExporting(true);
+    try {
+      const customResult = modelSource === 'custom' ? await prepareExportModel() : null;
+      const exportMesh = customResult?.mesh ?? buildMesh(triangulateBeforeExport ? 'highExport' : 'export') ?? mesh;
+      if (!exportMesh) throw new Error('Generate a mesh before exporting.');
+      const exportName = `${safeFileNamePart(imageTitle)}_${modelSource === 'custom' ? safeFileNamePart(customModel?.name ?? 'model') : shape.type}`;
+      const cleanupResult = modelSource === 'simple' && cleanupColorIslands ? cleanupSmallColorIslands(exportMesh, colorIslandMaxTriangles) : null;
+      const namedExportMesh: MeshData = { ...(cleanupResult?.mesh ?? exportMesh), name: exportName };
+      const exportValidation = customResult?.validation ?? validateMeshManifold(namedExportMesh);
+      setStatus('Writing 3MF...');
       await export3mf(namedExportMesh, `${exportName}.3MF`);
-      const cleanupStatus = cleanupResult && cleanupResult.replacedTriangleCount > 0
+      const cleanupStatus = customResult ? ` ${exportDetailStatus(customResult)}` : cleanupResult && cleanupResult.replacedTriangleCount > 0
         ? ` Cleaned ${cleanupResult.replacedIslandCount} color islands (${cleanupResult.replacedTriangleCount} triangles).`
-        : modelSource === 'simple' && cleanupColorIslands
-        ? ' No small color islands found.'
-        : '';
+        : cleanupColorIslands ? ' No small color islands found.' : '';
       setStatus((exportValidation.boundaryEdges || exportValidation.nonManifoldEdges
         ? `Exported 3MF, but validation found ${exportValidation.boundaryEdges} boundary and ${exportValidation.nonManifoldEdges} non-manifold edges.`
         : 'Exported 3MF with face material colors and Prusa metadata.') + cleanupStatus);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '3MF export failed.');
-    } finally {
-      setIsExporting(false);
-    }
+    } finally { setIsExporting(false); }
   };
 
   const handleResetSettings = useCallback(() => {
@@ -426,6 +468,8 @@ export default function App() {
     setModelError(null);
     setModelSource('simple');
     setCustomSettings(defaultCustomSettings);
+    setCustomExportSettings(defaultCustomExportSettings);
+    setShowingExportPreview(false);
     setMapping(defaultMapping);
     setShape(defaultShapeForImage(defaultShape.type, imageCanvas));
     setRelief(defaultRelief);
@@ -460,7 +504,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <aside className="control-panel">
+      <aside className="control-panel" inert={preparingExport || isExporting}>
         <header>
           <p className="eyebrow">Client-side 3MF generator</p>
           <h1>ColorMix Image Mapper</h1>
@@ -468,7 +512,7 @@ export default function App() {
             <button type="button" onClick={handleResetSettings}>
               Reset settings
             </button>
-            <button type="button" className="primary-button" onClick={handleExport} disabled={isExporting || isBuilding || modelLoading || (modelSource === 'custom' ? !mesh : (!mesh && !processedCanvas))}>
+            <button type="button" className="primary-button" onClick={handleExport} disabled={isExporting || preparingExport || isBuilding || modelLoading || (modelSource === 'custom' ? !mesh : (!mesh && !processedCanvas))}>
               {isExporting ? 'Exporting...' : 'Export 3MF'}
             </button>
           </div>
@@ -507,9 +551,15 @@ export default function App() {
       </aside>
       <section className="work-area">
         <Preview3D mesh={mesh} customSettings={modelSource === 'custom' ? customSettings : undefined}
-          imageAspect={imageAspectRatio} mapping={mapping} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading} />
+          imageAspect={imageAspectRatio} mapping={mapping} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading || preparingExport || isExporting} />
         <ExportPanel
           customModel={modelSource === 'custom'}
+          customSettings={customExportSettings}
+          onCustomSettingsChange={next => { pushUndo(); setCustomExportSettings(next); }}
+          preparingExport={preparingExport}
+          showingExportPreview={modelSource === 'custom' && showingExportPreview}
+          onPreviewExport={handlePreviewExport}
+          onCancelPreparation={cancelExportPreparation}
           canExport={!isBuilding && !modelLoading && (modelSource === 'custom' ? Boolean(mesh) : Boolean(mesh || processedCanvas))}
           isExporting={isExporting}
           triangleCount={mesh?.triangles.length ?? 0}

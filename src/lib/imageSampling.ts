@@ -82,11 +82,9 @@ export function makeImageSampler(canvas: ImageCanvas, settings: ImageMappingSett
 
 export type ImagePixels = { data: Uint8ClampedArray; width: number; height: number };
 
-export function makePixelSampler(canvas: ImagePixels, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel, surfaceAspect?: number): (u: number, v: number) => Rgba {
-  const data = canvas.data;
-  const imageAspect = canvas.width / canvas.height;
+export function makeImageCoordinateMapper(imageAspect: number, settings: ImageMappingSettings, surfaceAspect?: number) {
 
-  return (u: number, v: number): Rgba => {
+  return (u: number, v: number) => {
     let mappedU = settings.mirrorX ? 1 - u : u;
     let mappedV = settings.flipY ? v : 1 - v;
     mappedU = (mappedU - 0.5) / settings.scale + 0.5 + settings.offsetU;
@@ -111,6 +109,16 @@ export function makePixelSampler(canvas: ImagePixels, settings: ImageMappingSett
       }
     }
 
+    return { u: mappedU, v: mappedV };
+  };
+}
+
+export function makePixelSampler(canvas: ImagePixels, settings: ImageMappingSettings, padColor: Rgba = fallbackPixel, surfaceAspect?: number): (u: number, v: number) => Rgba {
+  const data = canvas.data;
+  const coordinates = makeImageCoordinateMapper(canvas.width / canvas.height, settings, surfaceAspect);
+  return (u: number, v: number): Rgba => {
+    const mapped = coordinates(u, v);
+    let mappedU = mapped.u, mappedV = mapped.v;
     if (settings.repeatX) {
       mappedU = positiveModulo(mappedU, 1);
     } else if (mappedU < 0 || mappedU > 1) {

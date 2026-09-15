@@ -412,6 +412,12 @@ header h1 {
   gap: 10px;
 }
 
+.custom-export { align-items: flex-start; }
+.custom-export > div:first-child { max-width: 250px; }
+.custom-export .export-actions { flex: 1; min-width: 0; }
+.custom-export .export-actions .helper-copy { flex-basis: 100%; }
+.custom-export .field { gap: 3px; }
+
 .export-number-row {
   display: grid;
   grid-template-columns: auto 70px;

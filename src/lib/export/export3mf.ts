@@ -112,7 +112,8 @@ function getColorMixPhysicalCount(mesh: MeshData): number | null {
 }
 
 function getMaxUsedMaterialCount(mesh: MeshData): number {
-  return Math.max(1, ...mesh.triangles.map((triangle) => triangle.materialIndex + 1));
+  // Spreading a large mesh into Math.max exceeds the engine's argument limit.
+  return mesh.triangles.reduce((count, triangle) => Math.max(count, triangle.materialIndex + 1), 1);
 }
 
 function parseHexColor(hex: string): [number, number, number] {
