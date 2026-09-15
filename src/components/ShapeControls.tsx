@@ -121,7 +121,7 @@ export function ShapeControls({ source, onSourceChange, customControls, settings
     <section className="panel-section">
       <h2>Shape</h2>
       <label className="field"><span>Model source</span><select value={source} onChange={e => onSourceChange(e.target.value as ModelSource)}>
-        <option value="simple">Simple shapes</option><option value="custom">Custom STL / 3MF / OBJ</option>
+        <option value="simple">Simple shapes</option><option value="custom">Custom STL / 3MF / OBJ (EXPERIMENTAL)</option>
       </select></label>
       {source === 'custom' ? customControls : <>
       <div className="segmented">

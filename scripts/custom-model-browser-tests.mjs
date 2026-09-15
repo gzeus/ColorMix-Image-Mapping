@@ -198,7 +198,7 @@ try {
     const recipes = await zip.file('Metadata/Prusa_Slicer_full_spectrum.json').async('string');
     if (!recipes.includes('components')) throw new Error('Export lost ColorMix recipes');
     const { importModel } = await import('/src/lib/geometry/importModel.ts');
-    if(window.previewTriangleCount<=400000){const restored = await importModel(new File([window.exportedModel],'roundtrip.3mf'));
+    if(window.previewTriangleCount<=800000){const restored = await importModel(new File([window.exportedModel],'roundtrip.3mf'));
     if (restored.triangles.length !== window.previewTriangleCount) throw new Error('3MF roundtrip lost triangles');}
     return 'PASS: 3MF export triangle count, paint segmentation, ColorMix recipes, geometry roundtrip';
   })()`));

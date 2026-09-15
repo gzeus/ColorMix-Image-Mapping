@@ -4,7 +4,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import type { MeshData } from './meshTypes';
 
-const MAX_TRIANGLES = 400_000;
+const MAX_TRIANGLES = 800_000;
 const children = (node: Element, name: string) => Array.from(node.children).filter(child => child.localName === name);
 const child = (node: Element, name: string) => children(node, name)[0];
 const zUpToYUp = new Matrix4().makeRotationX(-Math.PI / 2);
@@ -32,7 +32,8 @@ export async function importModel(file: File): Promise<MeshData> {
   let part = 0;
   const append = (positions: ArrayLike<number>, indices: ArrayLike<number> | null, matrix: Matrix4) => {
     const count = indices?.length ?? positions.length / 3;
-    if (count % 3 || triangles.length + count / 3 > MAX_TRIANGLES) throw new Error('Model exceeds 400,000 triangles. Simplify it before importing.');
+    if (count % 3) throw new Error('Model contains incomplete triangle data.');
+    if (triangles.length + count / 3 > MAX_TRIANGLES) throw new Error(`Model exceeds ${MAX_TRIANGLES.toLocaleString('en-US')} triangles. Simplify it before importing.`);
     // Weld within each part only, preserving separately instanced/touching shells.
     const weld = new Map<string, number>();
     const remap: number[] = [];
