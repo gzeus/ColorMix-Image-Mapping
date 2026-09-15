@@ -1,5 +1,5 @@
 import type { PaintForest, PaintNode } from './prusaPaint';
-import { Box3, Ray, Triangle, Vector3 } from 'three';
+import { Box3, Euler, Matrix4, Ray, Triangle, Vector3 } from 'three';
 import { nearestPaletteIndex, type PaletteColor, type Rgba } from '../colorUtils';
 import { makeImageCoordinateMapper, makePixelSampler, type ImagePixels } from '../imageSampling';
 import { meshBounds, projectionFrame, transformModel, type CustomSettings } from './customModel';
@@ -111,7 +111,13 @@ function occluded(ray: Ray, node: Node, hit: Vector3): boolean {
   return occluded(ray, node.left!, hit) || occluded(ray, node.right!, hit);
 }
 
+// Immutable image placements share one project-wide material palette.
+export type ProjectionLayer = {
+  settings: CustomSettings; mapping: ImageMappingSettings; pixels: ImagePixels;
+};
+
 export type ProjectionRequest = {
+  layers?: ProjectionLayer[];
   source: MeshData; settings: CustomSettings; mapping: ImageMappingSettings;
   pixels: ImagePixels | null; palette: PaletteColor[]; baseIndex: number;
   refinement?: { multiplier: number; budget: number };
@@ -120,56 +126,98 @@ export type ProjectionRequest = {
 
 };
 
-export function projectModel({ source, settings, mapping, pixels, palette, baseIndex, refinement, paintEncoding }: ProjectionRequest) {
+export function projectModel({ source, settings, mapping, pixels, palette, baseIndex, refinement, paintEncoding, layers = [] }: ProjectionRequest) {
   const original = transformModel(source, settings);
-  const frame = projectionFrame(original, settings);
   const size = meshBounds(original).getSize(new Vector3());
   const maxSize = Math.max(size.x, size.y, size.z, 0.001);
-
   const base = palette[baseIndex];
-  const sampler: (u: number, v: number) => Rgba = pixels ? makePixelSampler(pixels, mapping, base, frame.width / frame.height) : () => base;
-  const tree = pixels && settings.projection === 'planar' && settings.visibleOnly ? buildTree(original.triangles.map(t => new Triangle(
-    new Vector3().fromArray(original.vertices, t.a * 3), new Vector3().fromArray(original.vertices, t.b * 3), new Vector3().fromArray(original.vertices, t.c * 3),
-  ))) : null;
-  const triangle = new Triangle(), center = new Vector3(), normal = new Vector3(), relative = new Vector3();
+  const placements = pixels ? [...layers, { settings, mapping, pixels }] : layers;
+  const tree = placements.some(layer => layer.settings.projection === 'planar' && layer.settings.visibleOnly)
+    ? buildTree(original.triangles.map(t => new Triangle(
+      new Vector3().fromArray(original.vertices, t.a * 3), new Vector3().fromArray(original.vertices, t.b * 3), new Vector3().fromArray(original.vertices, t.c * 3),
+    ))) : null;
+  const triangle = new Triangle(), center = new Vector3(), normal = new Vector3();
   const ray = new Ray(), hit = new Vector3();
-  const angle = settings.imageRotation * Math.PI / 180;
-  const cos = Math.cos(angle), sin = Math.sin(angle);
   const colorCache = new Map<number, number>();
-  const uvAt = (point: Vector3) => {
-    relative.copy(point).sub(frame.center);
-    if (settings.projection === 'cylindrical') return { u: Math.atan2(relative.x, relative.z) / (2 * Math.PI) + 0.5, v: relative.y / frame.height + 0.5 };
-    const x = relative.dot(frame.right), y = relative.dot(frame.up);
-    return { u: (x * cos + y * sin) / frame.width + 0.5, v: (-x * sin + y * cos) / frame.height + 0.5 };
+  // Recover each transform's translation from a corresponding source vertex.
+  // This keeps baked placements attached when the model is scaled or rotated.
+  const matrixFor = (geometry: MeshData, configuration: CustomSettings) => {
+    const matrix = new Matrix4().makeRotationFromEuler(new Euler(...configuration.rotation.map(v => v * Math.PI / 180) as [number, number, number]));
+    matrix.scale(new Vector3().setScalar(configuration.scale));
+    const translation = new Vector3().fromArray(geometry.vertices).sub(new Vector3().fromArray(source.vertices).applyMatrix4(matrix));
+    return matrix.setPosition(translation);
   };
-  const coordinates = makeImageCoordinateMapper(pixels ? pixels.width / pixels.height : 1, mapping, frame.width / frame.height);
-  const detail = (settings.detail === 'fine' ? 128 : 64) * (refinement?.multiplier ?? 1);
+  const currentMatrix = matrixFor(original, settings);
+  const inverseCurrent = currentMatrix.clone().invert();
+  const contexts = placements.map(({ settings, mapping, pixels }) => {
+    const layerGeometry = transformModel(source, settings);
+    const frame = projectionFrame(layerGeometry, settings);
+    const layerMatrix = matrixFor(layerGeometry, settings);
+    const toLayer = layerMatrix.clone().multiply(inverseCurrent);
+    const direction = frame.direction.clone().transformDirection(currentMatrix.clone().multiply(layerMatrix.clone().invert()));
+    const relative = new Vector3();
+    const sampler: (u: number, v: number) => Rgba = makePixelSampler(pixels, mapping, base, frame.width / frame.height);
+    const angle = settings.imageRotation * Math.PI / 180;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const uvAt = (point: Vector3) => {
+      relative.copy(point).applyMatrix4(toLayer).sub(frame.center);
+      if (settings.projection === 'cylindrical') return { u: Math.atan2(relative.x, relative.z) / (2 * Math.PI) + 0.5, v: relative.y / frame.height + 0.5 };
+      const x = relative.dot(frame.right), y = relative.dot(frame.up);
+      return { u: (x * cos + y * sin) / frame.width + 0.5, v: (-x * sin + y * cos) / frame.height + 0.5 };
+    };
+    const coordinates = makeImageCoordinateMapper(pixels.width / pixels.height, mapping, frame.width / frame.height);
+    const detail = (settings.detail === 'fine' ? 128 : 64) * (refinement?.multiplier ?? 1);
+    const priority: RefinementPriority = (face, vertices) => {
+      triangle.a.fromArray(vertices, face.a * 3); triangle.b.fromArray(vertices, face.b * 3); triangle.c.fromArray(vertices, face.c * 3);
+      triangle.getNormal(normal);
+      if (settings.projection === 'planar' && settings.visibleOnly && Math.abs(normal.dot(direction)) <= Math.cos(75 * Math.PI / 180)) return [0, 0, 0];
+      const points = [triangle.a, triangle.b, triangle.c].map(point => uvAt(point));
+      // Unwrap this triangle locally so crossing the cylindrical seam is not an enormous edge.
+      if (settings.projection === 'cylindrical') {
+        for (let i = 1; i < 3; i++) points[i].u -= Math.round(points[i].u - points[0].u);
+      }
+      const mapped = points.map(p => coordinates(p.u, p.v));
+      const minU = Math.min(...mapped.map(p => p.u)), maxU = Math.max(...mapped.map(p => p.u));
+      const minV = Math.min(...mapped.map(p => p.v)), maxV = Math.max(...mapped.map(p => p.v));
+      if (settings.projection === 'planar' && ((!mapping.repeatX && (maxU < 0 || minU > 1)) || (!mapping.repeatY && (maxV < 0 || minV > 1)))) return [0, 0, 0];
+      const colors = [...points, {u:(points[0].u+points[1].u+points[2].u)/3, v:(points[0].v+points[1].v+points[2].v)/3}].map(p => {
+        const color = sampler(p.u, p.v);
+        return (color.r >> 4) * 4096 + (color.g >> 4) * 256 + (color.b >> 4) * 16 + ((color.a ?? 255) >> 4);
+      });
+      const boundary = colors.some(color => color !== colors[0]) || (!mapping.repeatX && (minU < 0 && maxU > 0 || minU < 1 && maxU > 1)) || (!mapping.repeatY && (minV < 0 && maxV > 0 || minV < 1 && maxV > 1));
+      // Image-space refinement spends triangles on the artwork, especially its boundaries.
+      return mapped.map((p, i) => {
+        const q = mapped[(i + 1) % 3];
+        const length = Math.hypot(p.u - q.u, p.v - q.v);
+        return length * detail * (boundary ? 4 : 1);
+      }) as [number, number, number];
+    };
+
+    const sample = (point: Vector3, faceNormal: Vector3): Rgba | null => {
+      if (settings.projection === 'planar' && settings.visibleOnly) {
+        if (Math.abs(faceNormal.dot(direction)) <= Math.cos(75 * Math.PI / 180)) return null;
+        if (tree) {
+          ray.set(point.clone().addScaledVector(direction, maxSize * 1e-7), direction);
+          if (occluded(ray, tree, hit)) return null;
+        }
+      }
+      const { u, v } = uvAt(point);
+      const mapped = coordinates(u, v);
+      if ((!mapping.repeatX && (mapped.u < 0 || mapped.u > 1)) || (!mapping.repeatY && (mapped.v < 0 || mapped.v > 1))) return null;
+      const pixel = sampler(u, v);
+      return (pixel.a ?? 255) > 0 ? pixel : null;
+    };
+    return { priority, sample };
+  });
   const priority: RefinementPriority = (face, vertices) => {
-    triangle.a.fromArray(vertices, face.a * 3); triangle.b.fromArray(vertices, face.b * 3); triangle.c.fromArray(vertices, face.c * 3);
-    triangle.getNormal(normal);
-    if (settings.projection === 'planar' && settings.visibleOnly && Math.abs(normal.dot(frame.direction)) <= Math.cos(75 * Math.PI / 180)) return [0, 0, 0];
-    const points = [triangle.a, triangle.b, triangle.c].map(point => uvAt(point));
-    // Unwrap this triangle locally so crossing the cylindrical seam is not an enormous edge.
-    if (settings.projection === 'cylindrical') {
-      for (let i = 1; i < 3; i++) points[i].u -= Math.round(points[i].u - points[0].u);
+    const scores: [number, number, number] = [0, 0, 0];
+    for (const context of contexts) {
+      const next = context.priority(face, vertices);
+      for (let i = 0; i < 3; i++) scores[i] = Math.max(scores[i], next[i]);
     }
-    const mapped = points.map(p => coordinates(p.u, p.v));
-    const minU = Math.min(...mapped.map(p => p.u)), maxU = Math.max(...mapped.map(p => p.u));
-    const minV = Math.min(...mapped.map(p => p.v)), maxV = Math.max(...mapped.map(p => p.v));
-    if (settings.projection === 'planar' && ((!mapping.repeatX && (maxU < 0 || minU > 1)) || (!mapping.repeatY && (maxV < 0 || minV > 1)))) return [0, 0, 0];
-    const colors = [...points, {u:(points[0].u+points[1].u+points[2].u)/3, v:(points[0].v+points[1].v+points[2].v)/3}].map(p => {
-      const color = sampler(p.u, p.v);
-      return (color.r >> 4) * 4096 + (color.g >> 4) * 256 + (color.b >> 4) * 16 + ((color.a ?? 255) >> 4);
-    });
-    const boundary = colors.some(color => color !== colors[0]) || (!mapping.repeatX && (minU < 0 && maxU > 0 || minU < 1 && maxU > 1)) || (!mapping.repeatY && (minV < 0 && maxV > 0 || minV < 1 && maxV > 1));
-    // Image-space refinement spends triangles on the artwork, especially its boundaries.
-    return mapped.map((p, i) => {
-      const q = mapped[(i + 1) % 3];
-      const length = Math.hypot(p.u - q.u, p.v - q.v);
-      return length * detail * (boundary ? 4 : 1);
-    }) as [number, number, number];
+    return scores;
   };
-  const refined = pixels ? refineMesh(original, maxSize / detail, refinement?.budget ?? 400_000, priority, paintEncoding === 'subtriangle') : { mesh: original, limited: false, paintForest: undefined };
+  const refined = contexts.length ? refineMesh(original, maxSize / 64, refinement?.budget ?? 400_000, priority, paintEncoding === 'subtriangle') : { mesh: original, limited: false, paintForest: undefined };
   const mesh = refined.mesh;
   let painted = 0;
   const triangles = mesh.triangles.map(face => {
@@ -177,24 +225,17 @@ export function projectModel({ source, settings, mapping, pixels, palette, baseI
     triangle.b.fromArray(mesh.vertices, face.b * 3);
     triangle.c.fromArray(mesh.vertices, face.c * 3);
     triangle.getMidpoint(center); triangle.getNormal(normal);
-    let materialIndex = baseIndex;
+    let color = { r: base.r, g: base.g, b: base.b };
     let projectionRegion: 0 | 1 = 0;
-    let eligible = Boolean(pixels);
-    if (settings.projection === 'planar' && settings.visibleOnly) {
-      // Double-sided imports may have inconsistent winding, so use absolute facing angle.
-      eligible = eligible && Math.abs(normal.dot(frame.direction)) > Math.cos(75 * Math.PI / 180);
-      if (eligible && tree) {
-        ray.set(center.clone().addScaledVector(frame.direction, maxSize * 1e-7), frame.direction);
-        eligible = !occluded(ray, tree, hit);
-      }
-    }
-    const { u, v } = uvAt(center);
-    if (eligible) {
-      const pixel = sampler(u, v);
-      const mapped = coordinates(u, v);
-      if ((mapping.repeatX || mapped.u >= 0 && mapped.u <= 1) && (mapping.repeatY || mapped.v >= 0 && mapped.v <= 1) && (pixel.a ?? 255) > 0) projectionRegion = 1;
+    for (const context of contexts) {
+      const pixel = context.sample(center, normal);
+      if (!pixel) continue;
+      projectionRegion = 1;
       const alpha = (pixel.a ?? 255) / 255;
-      const color = { r: Math.round(pixel.r * alpha + base.r * (1 - alpha)), g: Math.round(pixel.g * alpha + base.g * (1 - alpha)), b: Math.round(pixel.b * alpha + base.b * (1 - alpha)) };
+      color = { r: Math.round(pixel.r * alpha + color.r * (1 - alpha)), g: Math.round(pixel.g * alpha + color.g * (1 - alpha)), b: Math.round(pixel.b * alpha + color.b * (1 - alpha)) };
+    }
+    let materialIndex = baseIndex;
+    if (projectionRegion) {
       const key = color.r * 65536 + color.g * 256 + color.b;
       let index = colorCache.get(key);
       if (index === undefined) { index = nearestPaletteIndex(color, palette); colorCache.set(key, index); }

@@ -15,6 +15,7 @@ npm run dev
 - Map the image around a cylinder or procedural vase, or onto a plane or arc.
 - Import custom STL, 3MF, or OBJ geometry, scale it uniformly, and rotate it.
 - Project onto visible surfaces from a chosen view or wrap around the vertical axis.
+- Bake multiple image placements onto a custom model with one shared filament palette, and export the current composition or the last baked result.
 - Control stretch/contain/cover fit, scale, offsets, horizontal mirror, and horizontal repeat.
 - Quantize to 2, 3, 4, 5, 8, or 16 colors.
 - Edit the palette directly or use a manual filament palette.
@@ -41,13 +42,23 @@ Under **Shape > Model source**, choose **Custom STL / 3MF / OBJ** and load a mod
 - **Clean small color islands** uses **Max island mm?** for imported models (default 0.05 mm?). It merges small islands into larger neighboring colors by shared boundary length, without crossing the image/visibility mask. Small lettering can also be removed, so keep the threshold low. Simple shapes retain the original triangle-count cleanup setting.
 - **Preview export** prepares and displays the exact refined/cleaned paint used by the next export. Changes to the image, model, palette, or export options invalidate that prepared result. Export preparation runs in a separate worker and can be cancelled; final 3MF packaging is not cancellable. The ordinary preview remains lighter. Relief remains available for simple shapes.
 
+### Baking multiple images
+
+In the custom model's projection toolbar, click **Bake current texture** to commit the current image placement on top of all earlier bakes. Baking uses the current export detail and cleanup settings. Then load another image, or orbit and use **Project from view** to place the same logo on another side. Adjusting placement activates the image again; the bake button stays disabled until there is an active placement. Newer images cover older paint only inside their footprint and visibility mask. Transparent pixels preserve the underlying paint; partial transparency blends with it.
+
+All placements share the project's filament scheme, color palette, and unpainted color. These controls lock after the first bake, including automatic palette quantization. **Clear baked textures** unlocks them. Undo restores placements and images; replacing the model or resetting settings starts a fresh stack. Baked placements stay attached when the model is scaled or rotated. There is no fixed image-count limit, but memory and processing time increase with the number and size of images, and the sampling budget is shared across the composition.
+
+**Export content** offers **Export current preview** (all bakes plus the active image, using the selected export detail/cleanup) or **Export last baked texture** (the complete project as of the last bake, excluding subsequent image, geometry, and export-setting changes). **Preview export** displays the selected result. The latest baked mesh is cached in browser memory; earlier full meshes are not kept in undo history. Immutable image pixels and placement settings are retained for resampling and undo, and repeated placements of the same processed image share pixel data. If undo restores an older bake, its stored settings allow the cache to be rebuilt. This cache lasts for the current tab session only: reload closes the project, so export a 3MF to keep the printable result. Importing that 3MF later still imports geometry only, not editable image layers.
+
 STL supports ASCII and binary encoding. STL/OBJ coordinates are interpreted as millimeters with Z up; use scaling and rotation to correct other conventions. 3MF import reads declared units, build/component transforms, and referenced model parts. Imported textures, paint, and slicer configuration are replaced by this project's image/palette. Multiple build items are retained together as one exported mesh; this is not a slicer-project editor. Imports are limited to 80 MB and 400,000 source triangles. Native paint exports keep that source geometry; legacy exports may contain up to 2 million geometry triangles and need simplification before reimport. Open/non-manifold geometry is reported, not automatically repaired.
 
-The app supports one image placement at a time. Native paint keeps the model geometry small, but temporary render/sampling triangles and PrusaSlicer paint trees still consume memory. It does not provide unlimited color resolution. Very small image features may be lost at the triangle limit; cylindrical projection distorts complex appendages and end faces. Printed ColorMix appearance still depends on layer height, filament, and surface orientation.
+Native paint keeps the model geometry small, but temporary render/sampling triangles and PrusaSlicer paint trees still consume memory. It does not provide unlimited color resolution. Very small image features may be lost at the triangle limit; cylindrical projection distorts complex appendages and end faces. Printed ColorMix appearance still depends on layer height, filament, and surface orientation.
 
 ## Validation
 
 `npm run build` checks TypeScript and the production bundle. `scripts/custom-model-browser-tests.mjs` exercises import formats, 3MF units/assemblies, mesh refinement, occlusion, the React/worker workflow, dragging, export metadata and geometry roundtripping, partial-budget refinement, area-based cleanup, export cancellation/preview, and returning to simple shapes. It requires Vite at `http://127.0.0.1:5173` and a local Chromium browser with remote debugging on port 9223. Run it with `node scripts/custom-model-browser-tests.mjs`. If present, the repository's Benchbin and Gecko 3MF files are also tested. Screenshots go to `node_modules/.tmp/`. With the same server/browser running and the repository Benchy file present, `node scripts/benchy-detail-benchmark.mjs` compares preview/export triangle counts, processing time, and image-boundary overshoot on the actual Benchy geometry. Add `--paint --package` to verify native paint on the Benchy and save `node_modules/.tmp/benchy-native-paint.3mf`, or `--high --package` to exercise legacy 4x / 2-million-triangle export. Browser downloads are suppressed during these tests.
+
+For layered painting, run `node scripts/baked-textures-browser-tests.mjs` with the same Vite/browser setup. It checks multi-view compositing, transparency and overlap, transforms, native/legacy parity, many layers, palette locking, undo, and real 3MF exports of cached versus current paint.
 
 For native paint, run `node scripts/native-paint-browser-tests.mjs`, then `python scripts/native-paint-cli-tests.py`. The latter uses an isolated PrusaSlicer data directory and requires PrusaSlicer 2.9.6 (override the executable with `PRUSA_SLICER`). It verifies preservation of the original 12-face fixture and its exact paint strings through PrusaSlicer, then slices it and checks all five ColorMix tools are used. The browser test checks extended material states, all subdivision headers, and decoded color placement against the rendered preview.
 
@@ -67,7 +78,7 @@ The exporter follows the sibling Color Mix Shading app's PrusaSlicer strategy, w
 
 ## Roadmap
 
-- Multiple image placements and region selection.
+- Region selection for image placements.
 - Region cleanup / island removal.
 - Lab color matching.
 - Real filament preset library.

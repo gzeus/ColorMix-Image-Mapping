@@ -12,6 +12,11 @@ type Props = {
   onMappingChange: (settings: ImageMappingSettings) => void;
   onProjectionChange: (settings: CustomSettings) => void;
   busy?: boolean;
+  onBake: () => void;
+  onClearBaked: () => void;
+  bakedCount: number;
+  canBake: boolean;
+  activeTexture: boolean;
 };
 
 type MeshBounds = {
@@ -66,7 +71,7 @@ function fitCameraToBounds(camera: THREE.OrthographicCamera, bounds: MeshBounds,
   camera.updateProjectionMatrix();
 }
 
-export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappingChange, onProjectionChange, busy }: Props) {
+export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappingChange, onProjectionChange, busy, onBake, onClearBaked, bakedCount, canBake, activeTexture }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -210,7 +215,7 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
 
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene || !mesh || !customSettings || customSettings.projection !== 'planar' || !showFrame || !imageAspect) return;
+    if (!scene || !mesh || !customSettings || customSettings.projection !== 'planar' || !showFrame || !imageAspect || !activeTexture) return;
     const frame = projectionFrame(mesh, customSettings);
     let width = frame.width * mapping.scale, height = frame.height * mapping.scale;
     if (mapping.fitMode === 'contain') {
@@ -231,7 +236,7 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
     guide.name = 'projection-guide'; guide.renderOrder = 10;
     scene.add(guide);
     return () => { scene.remove(guide); geometry.dispose(); material.dispose(); };
-  }, [mesh, customSettings, mapping, showFrame, imageAspect]);
+  }, [mesh, customSettings, mapping, showFrame, imageAspect, activeTexture]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -334,8 +339,13 @@ export function Preview3D({ mesh, customSettings, imageAspect, mapping, onMappin
           <label className="check-row"><input type="checkbox" checked={showFrame} onChange={e => setShowFrame(e.target.checked)} /> Image frame</label>
         </>}
         {imageAspect && <label className="check-row">Image size <input aria-label="Preview image size" disabled={busy} type="range" min="0.25" max="3" step="0.01" value={mapping.scale} onChange={e => onMappingChange({ ...mapping, scale: Number(e.target.value) })} /></label>}
+        <button type="button" disabled={busy || !canBake} onClick={onBake}>Bake current texture</button>
+        {bakedCount > 0 && <>
+          <span>{bakedCount} baked {bakedCount === 1 ? 'texture' : 'textures'}</span>
+          <button type="button" disabled={busy} onClick={onClearBaked}>Clear baked textures</button>
+        </>}
         <label className="check-row"><input type="checkbox" checked={shaded} onChange={e => setShaded(e.target.checked)} /> Shape shading</label>
-        <span className="helper-copy">{busy ? 'Updating preview...' : moveImage ? 'Drag to move the image; release to update colors.' : customSettings.projection === 'cylindrical' ? 'Wrap around Y: adjust scale and offsets in Image.' : 'Orbit to a side, then project. Placement stays fixed as you orbit.'}</span>
+        <span className="helper-copy">{busy ? 'Updating preview...' : !activeTexture && bakedCount ? 'Texture baked. Project this image from another view, adjust placement, or choose a new image.' : moveImage ? 'Drag to move the image; release to update colors.' : customSettings.projection === 'cylindrical' ? 'Wrap around Y: adjust scale and offsets in Image.' : 'Orbit to a side, then project. Placement stays fixed as you orbit.'}</span>
       </div>}
       <div className={`viewport${moveImage ? ' moving-image' : ''}`} ref={hostRef} />
       {busy && <div className="preview-progress" role="status">Preparing preview...</div>}

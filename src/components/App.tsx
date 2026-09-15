@@ -1,3 +1,4 @@
+import type { ProjectionLayer } from '../lib/geometry/projectModel';
 import { defaultCustomExportSettings, useCustomExport, type CustomExportSettings, type PreparedModel } from '../lib/geometry/useCustomExport';
 import { CustomModelControls } from './CustomModelControls';
 import { projectionFrame, transformModel, defaultCustomSettings, type CustomSettings, type ModelSource } from '../lib/geometry/customModel';
@@ -41,7 +42,20 @@ const defaultShape: ShapeSettings = {
 const defaultRelief: ReliefSettings = { enabled: false, strengthMm: 0, invert: false, blurPx: 0 };
 const fallbackPalette = ['#f4efe5', '#263238', '#cf4b35', '#2e7d6f'].map((hex, index) => makePaletteColor(hex, index));
 
+type BakedRecipe = {
+  settings: CustomSettings;
+  exportSettings: CustomExportSettings;
+  extraDetail: boolean;
+  cleanup: boolean;
+  title: string;
+};
+
 type EditableSnapshot = {
+  bakedLayers: ProjectionLayer[];
+  bakedRecipe: BakedRecipe | null;
+  activeTexture: boolean;
+  imageCanvas: HTMLCanvasElement | null;
+  imageTitle: string;
   customExportSettings: CustomExportSettings;
   modelSource: ModelSource;
   customModel: MeshData | null;
@@ -98,6 +112,12 @@ function safeFileNamePart(value: string): string {
 }
 
 export default function App() {
+  const [bakedLayers, setBakedLayers] = useState<ProjectionLayer[]>([]);
+  const [bakedRecipe, setBakedRecipe] = useState<BakedRecipe | null>(null);
+  const [activeTexture, setActiveTexture] = useState(true);
+  const [exportTarget, setExportTarget] = useState<'current' | 'baked'>('current');
+  const bakedCache = useRef<{ layers: ProjectionLayer[]; result: PreparedModel; title: string; settings: CustomSettings } | null>(null);
+  const paletteLocked = bakedLayers.length > 0;
   const [customExportSettings, setCustomExportSettings] = useState(defaultCustomExportSettings);
   const [showingExportPreview, setShowingExportPreview] = useState(false);
   const { preparing: preparingExport, prepare: prepareCustomExport, cancel: cancelExportPreparation } = useCustomExport();
@@ -132,12 +152,13 @@ export default function App() {
   const undoStack = useRef<EditableSnapshot[]>([]);
 
   const processedCanvas = useMemo(() => (imageCanvas ? createProcessedCanvas(imageCanvas, relief.blurPx) : null), [imageCanvas, relief.blurPx]);
+  const processedPixels = useMemo(() => processedCanvas?.getContext('2d', { willReadFrequently: true })?.getImageData(0, 0, processedCanvas.width, processedCanvas.height) ?? null, [processedCanvas]);
   const colorMixPalette = useMemo(() => buildColorMixPalette(colorMixFilaments), [colorMixFilaments]);
   const effectivePalette = colorMixEnabled ? colorMixPalette : palette;
   const insideMaterialLimit = colorMixEnabled ? colorMixFilaments.length : effectivePalette.length;
   const effectiveInsideMaterialIndex = Math.max(0, Math.min(Math.max(0, insideMaterialLimit - 1), insideMaterialIndex));
   const padColor = effectivePalette[effectiveInsideMaterialIndex] ?? fallbackPalette[0];
-  const exportKey = useMemo(() => ({}), [customModel, customSettings, mapping, processedCanvas, effectivePalette, effectiveInsideMaterialIndex, customExportSettings, triangulateBeforeExport, cleanupColorIslands, modelSource]);
+  const exportKey = useMemo(() => ({}), [bakedLayers, activeTexture, customModel, customSettings, mapping, processedCanvas, effectivePalette, effectiveInsideMaterialIndex, customExportSettings, triangulateBeforeExport, cleanupColorIslands, modelSource, exportTarget]);
   const latestExportKey = useRef(exportKey);
   latestExportKey.current = exportKey;
   const customSurfaceAspect = useMemo(() => {
@@ -148,6 +169,7 @@ export default function App() {
   const imageAspectRatio = imageCanvas ? imageCanvas.width / Math.max(1, imageCanvas.height) : null;
 
   const snapshotEditableState = useCallback((): EditableSnapshot => ({
+    bakedLayers, bakedRecipe, activeTexture, imageCanvas, imageTitle,
     customExportSettings: { ...customExportSettings },
     modelSource, customModel, customSettings: { ...customSettings },
     mapping: { ...mapping },
@@ -162,7 +184,7 @@ export default function App() {
     cleanupColorIslands,
     colorIslandMaxTriangles,
     triangulateBeforeExport,
-  }), [customExportSettings, modelSource, customModel, customSettings, cleanupColorIslands, colorCount, colorIslandMaxTriangles, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
+  }), [bakedLayers, bakedRecipe, activeTexture, imageCanvas, imageTitle, customExportSettings, modelSource, customModel, customSettings, cleanupColorIslands, colorCount, colorIslandMaxTriangles, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
 
   const pushUndo = useCallback(() => {
     undoStack.current.push(snapshotEditableState());
@@ -178,6 +200,12 @@ export default function App() {
     }
     importSequence.current++;
     setModelLoading(false);
+    setBakedLayers(previous.bakedLayers);
+    setBakedRecipe(previous.bakedRecipe);
+    setActiveTexture(previous.activeTexture);
+    setImageCanvas(previous.imageCanvas);
+    setImageTitle(previous.imageTitle);
+    if (!previous.bakedLayers.length) setExportTarget('current');
     setCustomExportSettings(previous.customExportSettings);
     setModelSource(previous.modelSource);
     setCustomModel(previous.customModel);
@@ -200,7 +228,8 @@ export default function App() {
   const commitCustomSettings = useCallback((next: CustomSettings) => {
     pushUndo();
     setCustomSettings(next);
-  }, [pushUndo]);
+    if (next.projection !== customSettings.projection || next.direction !== customSettings.direction || next.up !== customSettings.up || next.imageRotation !== customSettings.imageRotation || next.visibleOnly !== customSettings.visibleOnly) setActiveTexture(true);
+  }, [pushUndo, customSettings]);
 
   const changeModelSource = (next: ModelSource) => {
     pushUndo();
@@ -220,6 +249,11 @@ export default function App() {
       const imported = await importModel(file);
       if (sequence !== importSequence.current) return;
       pushUndo();
+      setBakedLayers([]);
+      setBakedRecipe(null);
+      bakedCache.current = null;
+      setActiveTexture(true);
+      setExportTarget('current');
       setCustomModel(imported);
       setCustomSettings(defaultCustomSettings);
       setModelSource('custom');
@@ -235,6 +269,7 @@ export default function App() {
   const commitMapping = useCallback((next: ImageMappingSettings) => {
     pushUndo();
     setMapping(next);
+    setActiveTexture(true);
   }, [pushUndo]);
 
   const commitShape = useCallback((next: ShapeSettings) => {
@@ -258,15 +293,16 @@ export default function App() {
   }, [pushUndo]);
 
   useEffect(() => {
-    if (!processedCanvas || lockManualPalette || colorMixEnabled) {
+    if (!processedCanvas || lockManualPalette || colorMixEnabled || paletteLocked) {
       return;
     }
     setStatus('Quantizing image...');
     setPalette(quantizeCanvas(processedCanvas, colorCount));
-  }, [colorCount, colorMixEnabled, lockManualPalette, processedCanvas]);
+  }, [colorCount, colorMixEnabled, lockManualPalette, processedCanvas, paletteLocked]);
 
   useEffect(() => {
     if (!processedCanvas) {
+      setMappedPreviewUrl(null);
       return;
     }
     const preview = drawMappedImagePreview(processedCanvas, mapping, padColor, customSurfaceAspect);
@@ -310,23 +346,31 @@ export default function App() {
     if (modelSource === 'custom') {
       setMeshValidation(null);
       if (!customModel) { setMesh(null); setIsBuilding(false); setStatus('Load an STL, 3MF, or OBJ model.'); return; }
+      const cached = bakedCache.current;
+      if (!activeTexture && cached?.layers === bakedLayers && (Boolean(cached.result.mesh.paintPreview) === (customExportSettings.encoding === 'subtriangle')) && cached.settings.scale === customSettings.scale && cached.settings.rotation.every((v, i) => v === customSettings.rotation[i])) {
+        setMesh(cached.result.mesh);
+        setMeshValidation(cached.result.validation);
+        setIsBuilding(false);
+        setStatus(`${bakedLayers.length} textures baked. Load another image or project this image from a new view.`);
+        return;
+      }
       setIsBuilding(true);
       setStatus('Preparing model and image detail...');
       const worker = new Worker(new URL('../lib/geometry/projection.worker.ts', import.meta.url), { type: 'module' });
-      const pixels = processedCanvas?.getContext('2d', { willReadFrequently: true })?.getImageData(0, 0, processedCanvas.width, processedCanvas.height);
+      const pixels = activeTexture ? processedPixels : null;
       worker.onmessage = ({ data }) => {
         setIsBuilding(false);
         if (data.error) { setMesh(null); setStatus(data.error); return; }
         setMesh(data.mesh);
         setMeshValidation(data.validation);
-        setStatus(!processedCanvas ? 'Model ready. Add an image to paint it.' : data.limited
+        setStatus(!processedCanvas && !bakedLayers.length ? 'Model ready. Add an image to paint it.' : data.limited
           ? `Preview ready. ${customExportSettings.encoding === 'subtriangle' ? 'Paint sampling' : 'Triangle'} budget reached; use export detail for finer colors.`
           : data.painted === 0 ? 'No image colors visible. Adjust placement or choose Project from view.'
           : 'Preview ready. Use Preview export to check extra detail and cleanup.');
       };
       worker.onerror = () => { setMesh(null); setIsBuilding(false); setStatus('Model processing failed. Try a smaller model.'); };
-      const timer = window.setTimeout(() => worker.postMessage({ source: customModel, settings: customSettings, mapping,
-        pixels: pixels ? { data: pixels.data, width: pixels.width, height: pixels.height } : null,
+      const timer = window.setTimeout(() => worker.postMessage({ source: customModel, settings: customSettings, mapping, layers: bakedLayers,
+        pixels,
         palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex, paintEncoding: customExportSettings.encoding,
       }), 180);
       return () => { window.clearTimeout(timer); worker.terminate(); };
@@ -350,12 +394,12 @@ export default function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
         event.preventDefault();
-        undo();
+        if (!preparingExport && !isExporting) undo();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo]);
+  }, [undo, preparingExport, isExporting]);
 
   const loadImage = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -365,6 +409,8 @@ export default function App() {
     setStatus('Loading image...');
     try {
       const canvas = await fileToCanvas(file);
+      pushUndo();
+      setActiveTexture(true);
       if (imageUrl) URL.revokeObjectURL(imageUrl);
       setImageUrl(URL.createObjectURL(file));
       setImageTitle(fileTitleFromName(file.name));
@@ -376,7 +422,7 @@ export default function App() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Image failed to load.');
     }
-  }, [imageUrl, modelSource]);
+  }, [imageUrl, modelSource, pushUndo]);
 
   useEffect(() => {
     const preventDragDefault = (event: DragEvent) => {
@@ -384,6 +430,7 @@ export default function App() {
     };
     const handleDrop = (event: DragEvent) => {
       event.preventDefault();
+      if (preparingExport || isExporting) return;
       const files = Array.from(event.dataTransfer?.files ?? []);
       const modelFile = files.find(candidate => /\.(stl|3mf|obj)$/i.test(candidate.name));
       if (modelFile) void loadModel(modelFile);
@@ -400,22 +447,30 @@ export default function App() {
       window.removeEventListener('dragover', preventDragDefault);
       window.removeEventListener('drop', handleDrop);
     };
-  }, [loadImage, loadModel]);
+  }, [loadImage, loadModel, preparingExport, isExporting]);
 
-  const prepareExportModel = async (): Promise<PreparedModel> => {
+  const prepareExportModel = async (target: 'current' | 'baked' = 'current'): Promise<PreparedModel> => {
     if (!customModel) throw new Error('Load a custom model first.');
-    if (preparedExport.current?.key === exportKey) return preparedExport.current.result;
-    const pixels = processedCanvas?.getContext('2d', { willReadFrequently: true })?.getImageData(0, 0, processedCanvas.width, processedCanvas.height);
+    if (target === 'baked' && !bakedLayers.length) throw new Error('Bake a texture first.');
+    if (target === 'baked' && bakedCache.current?.layers === bakedLayers) return bakedCache.current.result;
+    if (target === 'current' && preparedExport.current?.key === exportKey) return preparedExport.current.result;
+    const recipe = target === 'baked' ? bakedRecipe : null;
+    const exportSettings = recipe?.exportSettings ?? customExportSettings;
+    const settings = recipe?.settings ?? customSettings;
+    const extraDetail = recipe?.extraDetail ?? triangulateBeforeExport;
+    const cleanup = recipe?.cleanup ?? cleanupColorIslands;
+    const pixels = target === 'current' && activeTexture ? processedPixels : null;
     setStatus('Preparing export detail and color cleanup...');
     const result = await prepareCustomExport({
-      source: customModel, settings: customSettings, mapping,
-      pixels: pixels ? { data: pixels.data, width: pixels.width, height: pixels.height } : null,
-      palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex, paintEncoding: customExportSettings.encoding,
-      refinement: triangulateBeforeExport ? { multiplier: customExportSettings.multiplier, budget: customExportSettings.budget } : undefined,
-      cleanupAreaMm2: cleanupColorIslands ? customExportSettings.islandAreaMm2 : undefined,
+      source: customModel, settings, mapping, layers: bakedLayers,
+      pixels,
+      palette: effectivePalette, baseIndex: effectiveInsideMaterialIndex, paintEncoding: exportSettings.encoding,
+      refinement: extraDetail ? { multiplier: exportSettings.multiplier, budget: exportSettings.budget } : undefined,
+      cleanupAreaMm2: cleanup ? exportSettings.islandAreaMm2 : undefined,
     });
     if (latestExportKey.current !== exportKey) throw new Error('Settings changed. Prepare the export again.');
-    preparedExport.current = { key: exportKey, result };
+    if (target === 'current') preparedExport.current = { key: exportKey, result };
+    else bakedCache.current = { layers: bakedLayers, result, title: recipe?.title ?? imageTitle, settings };
     return result;
   };
 
@@ -426,14 +481,42 @@ export default function App() {
     return `${result.mesh.triangles.length.toLocaleString()} geometry triangles.${result.mesh.paintLeafCount !== undefined ? ` ${result.mesh.paintLeafCount.toLocaleString()} paint regions.` : ''}${result.limited ? ' Sampling budget reached; some detail remains coarse.' : ''}${cleanup}`;
   };
 
+  const handleBake = async () => {
+    if (!processedCanvas || !activeTexture || isBuilding || modelLoading || preparingExport || isExporting) return;
+    try {
+      const result = await prepareExportModel('current');
+      const pixels = processedPixels!;
+      const layers = [...bakedLayers, { settings: { ...customSettings }, mapping: { ...mapping }, pixels }];
+      pushUndo();
+      bakedCache.current = { layers, result, title: imageTitle, settings: customSettings };
+      setBakedLayers(layers);
+      setBakedRecipe({ settings: customSettings, exportSettings: customExportSettings, extraDetail: triangulateBeforeExport, cleanup: cleanupColorIslands, title: imageTitle });
+      setActiveTexture(false);
+      setExportTarget('current');
+      setMesh(result.mesh);
+      setMeshValidation(result.validation);
+      setStatus(`${layers.length} textures baked. Project from another view or choose another image.`);
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Could not bake the texture.'); }
+  };
+
+  const clearBakedTextures = () => {
+    pushUndo();
+    setBakedLayers([]);
+    setBakedRecipe(null);
+    bakedCache.current = null;
+    setActiveTexture(true);
+    setExportTarget('current');
+    setStatus('Baked textures cleared. Filament mapping is unlocked.');
+  };
+
   const handlePreviewExport = async () => {
     if (isBuilding || modelLoading || isExporting || preparingExport) return;
     try {
-      const result = await prepareExportModel();
+      const result = await prepareExportModel(exportTarget);
       setMesh(result.mesh);
       setMeshValidation(result.validation);
       setShowingExportPreview(true);
-      setStatus(`Export preview ready. ${exportDetailStatus(result)}`);
+      setStatus(`${exportTarget === 'baked' ? 'Last baked texture export preview' : 'Export preview'} ready. ${exportDetailStatus(result)}`);
     } catch (error) { setStatus(error instanceof Error ? error.message : 'Export preview failed.'); }
   };
 
@@ -441,10 +524,10 @@ export default function App() {
     if (isBuilding || modelLoading || isExporting || preparingExport) return;
     setIsExporting(true);
     try {
-      const customResult = modelSource === 'custom' ? await prepareExportModel() : null;
+      const customResult = modelSource === 'custom' ? await prepareExportModel(exportTarget) : null;
       const exportMesh = customResult?.mesh ?? buildMesh(triangulateBeforeExport ? 'highExport' : 'export') ?? mesh;
       if (!exportMesh) throw new Error('Generate a mesh before exporting.');
-      const exportName = `${safeFileNamePart(imageTitle)}_${modelSource === 'custom' ? safeFileNamePart(customModel?.name ?? 'model') : shape.type}`;
+      const exportName = `${safeFileNamePart(modelSource === 'custom' && exportTarget === 'baked' ? bakedCache.current?.title ?? imageTitle : imageTitle)}_${modelSource === 'custom' ? safeFileNamePart(customModel?.name ?? 'model') : shape.type}`;
       const cleanupResult = modelSource === 'simple' && cleanupColorIslands ? cleanupSmallColorIslands(exportMesh, colorIslandMaxTriangles) : null;
       const namedExportMesh: MeshData = { ...(cleanupResult?.mesh ?? exportMesh), name: exportName };
       const exportValidation = customResult?.validation ?? validateMeshManifold(namedExportMesh);
@@ -466,6 +549,11 @@ export default function App() {
     importSequence.current++;
     setModelLoading(false);
     setModelError(null);
+    setBakedLayers([]);
+    setBakedRecipe(null);
+    bakedCache.current = null;
+    setActiveTexture(true);
+    setExportTarget('current');
     setModelSource('simple');
     setCustomSettings(defaultCustomSettings);
     setCustomExportSettings(defaultCustomExportSettings);
@@ -521,6 +609,8 @@ export default function App() {
         <ShapeControls source={modelSource} onSourceChange={changeModelSource}
           customControls={<CustomModelControls model={customModel} settings={customSettings} loading={modelLoading} error={modelError} onLoad={loadModel} onChange={commitCustomSettings} />}
           settings={shape} imageAspectRatio={imageAspectRatio} onChange={commitShape} />
+        {paletteLocked && <p className="helper-copy">Filament mapping is locked while textures are baked. Clear baked textures in the projection menu to change it. Bakes are kept in this tab until reload.</p>}
+        <fieldset className="palette-lock" disabled={paletteLocked}>
         <PaletteControls
           colorCount={colorCount}
           palette={palette}
@@ -547,12 +637,14 @@ export default function App() {
             setInsideMaterialIndex(index);
           }}
         />
+        </fieldset>
         {modelSource === 'simple' && <ReliefControls settings={relief} onChange={commitRelief} />}
       </aside>
       <section className="work-area">
         <Preview3D mesh={mesh} customSettings={modelSource === 'custom' ? customSettings : undefined}
-          imageAspect={imageAspectRatio} mapping={mapping} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading || preparingExport || isExporting} />
+          imageAspect={imageAspectRatio} mapping={mapping} onBake={handleBake} onClearBaked={clearBakedTextures} bakedCount={bakedLayers.length} canBake={Boolean(processedCanvas && activeTexture && !(showingExportPreview && exportTarget === 'baked'))} activeTexture={activeTexture && !(showingExportPreview && exportTarget === 'baked')} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading || preparingExport || isExporting} />
         <ExportPanel
+          exportTarget={exportTarget} onExportTargetChange={setExportTarget} hasBakedTexture={bakedLayers.length > 0}
           customModel={modelSource === 'custom'}
           customSettings={customExportSettings}
           onCustomSettingsChange={next => { pushUndo(); setCustomExportSettings(next); }}

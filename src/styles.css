@@ -464,3 +464,6 @@ header h1 {
     min-height: 48vh;
   }
 }
+
+.palette-lock { border: 0; padding: 0; margin: 0; min-width: 0; }
+.palette-lock:disabled { opacity: 0.65; }
