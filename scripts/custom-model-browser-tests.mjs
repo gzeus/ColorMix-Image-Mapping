@@ -146,6 +146,8 @@ try {
   await waitFor('document.body.innerText.includes("Preview ready.") && !document.querySelector(".preview-progress")');
   await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Side').click()`);
   await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Project from view').click()`);
+  await waitFor(`Boolean(Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Apply'))`);
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Apply').click()`);
   await waitFor('!document.querySelector(".preview-progress")');
   await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Move image').click()`);
   const bounds = await evaluate(`(() => {const r=document.querySelector('.viewport canvas').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);

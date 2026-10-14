@@ -469,3 +469,6 @@ header h1 {
 .palette-lock:disabled { opacity: 0.65; }
 
 .palette-lock.imported-palette:disabled { opacity: 1; }
+
+.camera-selector { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.camera-selector select { width: auto; }

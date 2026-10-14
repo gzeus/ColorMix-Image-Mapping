@@ -4,6 +4,7 @@ import type { ShapeSettings } from '../lib/geometry/meshTypes';
 
 type Props = {
   source: ModelSource;
+  sourceLocked?: boolean;
   onSourceChange: (source: ModelSource) => void;
   customControls: ReactNode;
   settings: ShapeSettings;
@@ -30,7 +31,7 @@ function diameterFor(heightMm: number, aspectRatio: number): number {
   return Math.max(5, (heightMm * aspectRatio) / Math.PI);
 }
 
-export function ShapeControls({ source, onSourceChange, customControls, settings, imageAspectRatio, onChange }: Props) {
+export function ShapeControls({ sourceLocked, source, onSourceChange, customControls, settings, imageAspectRatio, onChange }: Props) {
   const aspectRatio = imageAspectRatio && imageAspectRatio > 0 ? imageAspectRatio : settings.widthMm / Math.max(1, settings.heightMm);
   const patch = (partial: Partial<ShapeSettings>) => onChange({ ...settings, ...partial });
   const fitPanelToImage = (type: 'plane' | 'arc') => {
@@ -120,7 +121,7 @@ export function ShapeControls({ source, onSourceChange, customControls, settings
   return (
     <section className="panel-section">
       <h2>Shape</h2>
-      <label className="field"><span>Model source</span><select value={source} onChange={e => onSourceChange(e.target.value as ModelSource)}>
+      <label className="field"><span>Model source</span><select disabled={sourceLocked} value={source} onChange={e => onSourceChange(e.target.value as ModelSource)}>
         <option value="simple">Simple shapes</option><option value="custom">Custom STL / 3MF / OBJ (EXPERIMENTAL)</option>
       </select></label>
       {source === 'custom' ? customControls : <>
