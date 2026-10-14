@@ -105,6 +105,8 @@ try {
   await evaluate(`window.uploadColor('#c9378c')`);
   await waitFor(`document.body.innerText.includes('Preview ready.') && !document.querySelector('.preview-progress')`);
   await evaluate(`window.clickButton('Side');window.clickButton('Project from view')`);
+  await waitFor(`Boolean(Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Apply'))`);
+  await evaluate(`window.clickButton('Apply')`);
   await waitFor(`!document.querySelector('.preview-progress')`);
   await evaluate(`document.querySelector('header .primary-button').click()`);
   await waitFor(`window.exported.length===2 && !document.querySelector('aside').inert`);

@@ -113,6 +113,10 @@ function safeFileNamePart(value: string): string {
 }
 
 export default function App() {
+  const [projectionEditing, setProjectionEditing] = useState(false);
+  const placementSnapshot = useRef<EditableSnapshot | null>(null);
+  const skipProjectionRebuild = useRef(false);
+  const skipProjectionQuantization = useRef(false);
   const [bakedLayers, setBakedLayers] = useState<ProjectionLayer[]>([]);
   const [bakedRecipe, setBakedRecipe] = useState<BakedRecipe | null>(null);
   const [activeTexture, setActiveTexture] = useState(true);
@@ -131,6 +135,8 @@ export default function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const importSequence = useRef(0);
+  const imageImportSequence = useRef(0);
+  const [imageLoading, setImageLoading] = useState(false);
   const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageTitle, setImageTitle] = useState('image');
@@ -167,7 +173,7 @@ export default function App() {
     if (modelSource !== 'custom' || !customModel) return undefined;
     const frame = projectionFrame(transformModel(customModel, customSettings), customSettings);
     return frame.width / frame.height;
-  }, [modelSource, customModel, customSettings]);
+  }, [modelSource, customModel, customSettings.scale, customSettings.rotation, customSettings.projection, customSettings.direction, customSettings.up]);
   const imageAspectRatio = imageCanvas ? imageCanvas.width / Math.max(1, imageCanvas.height) : null;
 
   const snapshotEditableState = useCallback((): EditableSnapshot => ({
@@ -189,11 +195,49 @@ export default function App() {
   }), [bakedLayers, bakedRecipe, activeTexture, imageCanvas, imageTitle, customExportSettings, modelSource, customModel, customSettings, cleanupColorIslands, colorCount, colorIslandMaxTriangles, colorMixEnabled, colorMixFilaments, insideMaterialIndex, lockManualPalette, mapping, palette, relief, shape, triangulateBeforeExport]);
 
   const pushUndo = useCallback(() => {
+    if (projectionEditing) return;
     undoStack.current.push(snapshotEditableState());
     if (undoStack.current.length > 80) {
       undoStack.current.shift();
     }
-  }, [snapshotEditableState]);
+  }, [snapshotEditableState, projectionEditing]);
+
+  const beginProjection = (settings: CustomSettings) => {
+    placementSnapshot.current = snapshotEditableState();
+    setProjectionEditing(true);
+    setCustomSettings(settings);
+    setActiveTexture(true);
+  };
+
+  const applyProjection = (settings: CustomSettings) => {
+    if (imageLoading) return;
+    const previous = placementSnapshot.current;
+    if (!previous) return;
+    undoStack.current.push(previous);
+    if (undoStack.current.length > 80) undoStack.current.shift();
+    placementSnapshot.current = null;
+    setCustomSettings(settings);
+    setActiveTexture(true);
+    setProjectionEditing(false);
+  };
+
+  const cancelProjection = useCallback(() => {
+    const previous = placementSnapshot.current;
+    if (!previous) return;
+    placementSnapshot.current = null;
+    imageImportSequence.current++;
+    setImageLoading(false);
+    skipProjectionRebuild.current = true;
+    skipProjectionQuantization.current = true;
+    setCustomSettings(previous.customSettings);
+    setMapping(previous.mapping);
+    setImageCanvas(previous.imageCanvas);
+    setImageTitle(previous.imageTitle);
+    setActiveTexture(previous.activeTexture);
+    setShape(previous.shape);
+    setProjectionEditing(false);
+    setStatus('Placement cancelled. Previous preview restored.');
+  }, []);
 
   const undo = useCallback(() => {
     const previous = undoStack.current.pop();
@@ -201,6 +245,8 @@ export default function App() {
       return;
     }
     importSequence.current++;
+    imageImportSequence.current++;
+    setImageLoading(false);
     setModelLoading(false);
     setBakedLayers(previous.bakedLayers);
     setBakedRecipe(previous.bakedRecipe);
@@ -236,6 +282,8 @@ export default function App() {
   const changeModelSource = (next: ModelSource) => {
     pushUndo();
     importSequence.current++;
+    imageImportSequence.current++;
+    setImageLoading(false);
     setModelLoading(false);
     setModelSource(next);
     if (next === 'custom' && !customModel) setMapping(current => ({ ...current, fitMode: 'contain', repeatX: false, repeatY: false }));
@@ -308,12 +356,14 @@ export default function App() {
   }, [pushUndo]);
 
   useEffect(() => {
+    if (projectionEditing) return;
+    if (skipProjectionQuantization.current) { skipProjectionQuantization.current = false; return; }
     if (!processedCanvas || lockManualPalette || colorMixEnabled || paletteLocked) {
       return;
     }
     setStatus('Quantizing image...');
     setPalette(quantizeCanvas(processedCanvas, colorCount));
-  }, [colorCount, colorMixEnabled, lockManualPalette, processedCanvas, paletteLocked]);
+  }, [colorCount, colorMixEnabled, lockManualPalette, processedCanvas, paletteLocked, projectionEditing]);
 
   useEffect(() => {
     if (!processedCanvas) {
@@ -357,6 +407,12 @@ export default function App() {
   }, [customModel, effectiveInsideMaterialIndex, effectivePalette, mapping, padColor, processedCanvas, relief, shape]);
 
   useEffect(() => {
+    if (projectionEditing) {
+      setIsBuilding(false);
+      setStatus('Position the image, then click Apply. Projection calculations are paused.');
+      return;
+    }
+    if (skipProjectionRebuild.current) { skipProjectionRebuild.current = false; return; }
     preparedExport.current = null;
     setShowingExportPreview(false);
     if (modelSource === 'custom') {
@@ -404,27 +460,33 @@ export default function App() {
       setStatus(nextMesh ? 'Preview ready. 3MF color compatibility depends on slicer support. Tested target: PrusaSlicer.' : 'Upload an image to generate the preview.');
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [buildMesh, effectivePalette, processedCanvas, modelSource, customModel, customSettings, mapping, effectiveInsideMaterialIndex, exportKey]);
+  }, [buildMesh, effectivePalette, processedCanvas, modelSource, customModel, customSettings, mapping, effectiveInsideMaterialIndex, exportKey, projectionEditing]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && projectionEditing && !preparingExport && !isExporting) {
+        event.preventDefault(); cancelProjection(); return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
         event.preventDefault();
-        if (!preparingExport && !isExporting) undo();
+        if (!preparingExport && !isExporting) { if (projectionEditing) cancelProjection(); else undo(); }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, preparingExport, isExporting]);
+  }, [undo, preparingExport, isExporting, projectionEditing, cancelProjection]);
 
   const loadImage = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
       setStatus('Drop an image file to load it.');
       return;
     }
+    const sequence = ++imageImportSequence.current;
+    setImageLoading(true);
     setStatus('Loading image...');
     try {
       const canvas = await fileToCanvas(file);
+      if (sequence !== imageImportSequence.current) return;
       pushUndo();
       setActiveTexture(true);
       if (imageUrl) URL.revokeObjectURL(imageUrl);
@@ -433,12 +495,14 @@ export default function App() {
       setImageCanvas(canvas);
       setShape((current) => fitPanelShapeToImage(current, canvas));
       if (modelSource === 'simple') setMesh(null);
-      setMeshValidation(null);
+      if (!projectionEditing) setMeshValidation(null);
       setStatus('Image loaded. Generating preview...');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Image failed to load.');
+      if (sequence === imageImportSequence.current) setStatus(error instanceof Error ? error.message : 'Image failed to load.');
+    } finally {
+      if (sequence === imageImportSequence.current) setImageLoading(false);
     }
-  }, [imageUrl, modelSource, pushUndo]);
+  }, [imageUrl, modelSource, pushUndo, projectionEditing]);
 
   useEffect(() => {
     const preventDragDefault = (event: DragEvent) => {
@@ -449,7 +513,7 @@ export default function App() {
       if (preparingExport || isExporting) return;
       const files = Array.from(event.dataTransfer?.files ?? []);
       const modelFile = files.find(candidate => /\.(stl|3mf|obj)$/i.test(candidate.name));
-      if (modelFile) void loadModel(modelFile);
+      if (modelFile && !projectionEditing) void loadModel(modelFile);
       const file = files.find((candidate) => candidate.type.startsWith('image/'));
       if (file) {
         void loadImage(file);
@@ -463,7 +527,7 @@ export default function App() {
       window.removeEventListener('dragover', preventDragDefault);
       window.removeEventListener('drop', handleDrop);
     };
-  }, [loadImage, loadModel, preparingExport, isExporting]);
+  }, [loadImage, loadModel, preparingExport, isExporting, projectionEditing]);
 
   const prepareExportModel = async (target: 'current' | 'baked' = 'current'): Promise<PreparedModel> => {
     if (!customModel) throw new Error('Load a custom model first.');
@@ -498,7 +562,7 @@ export default function App() {
   };
 
   const handleBake = async () => {
-    if (!processedCanvas || !activeTexture || isBuilding || modelLoading || preparingExport || isExporting) return;
+    if (projectionEditing || imageLoading || !processedCanvas || !activeTexture || isBuilding || modelLoading || preparingExport || isExporting) return;
     try {
       const result = await prepareExportModel('current');
       const pixels = processedPixels!;
@@ -534,7 +598,7 @@ export default function App() {
   };
 
   const handlePreviewExport = async () => {
-    if (isBuilding || modelLoading || isExporting || preparingExport) return;
+    if (projectionEditing || imageLoading || isBuilding || modelLoading || isExporting || preparingExport) return;
     try {
       const result = await prepareExportModel(exportTarget);
       setMesh(result.mesh);
@@ -545,7 +609,7 @@ export default function App() {
   };
 
   const handleExport = async () => {
-    if (isBuilding || modelLoading || isExporting || preparingExport) return;
+    if (projectionEditing || imageLoading || isBuilding || modelLoading || isExporting || preparingExport) return;
     setIsExporting(true);
     try {
       const customResult = modelSource === 'custom' ? await prepareExportModel(exportTarget) : null;
@@ -571,6 +635,8 @@ export default function App() {
   const handleResetSettings = useCallback(() => {
     pushUndo();
     importSequence.current++;
+    imageImportSequence.current++;
+    setImageLoading(false);
     setModelLoading(false);
     setModelError(null);
     setBakedLayers([]);
@@ -622,20 +688,20 @@ export default function App() {
           <p className="eyebrow">Client-side 3MF generator</p>
           <h1>ColorMix Image Mapper</h1>
           <div className="header-actions">
-            <button type="button" onClick={handleResetSettings}>
+            <button type="button" onClick={handleResetSettings} disabled={projectionEditing}>
               Reset settings
             </button>
-            <button type="button" className="primary-button" onClick={handleExport} disabled={isExporting || preparingExport || isBuilding || modelLoading || (modelSource === 'custom' ? !mesh : (!mesh && !processedCanvas))}>
+            <button type="button" className="primary-button" onClick={handleExport} disabled={projectionEditing || imageLoading || isExporting || preparingExport || isBuilding || modelLoading || (modelSource === 'custom' ? !mesh : (!mesh && !processedCanvas))}>
               {isExporting ? 'Exporting...' : 'Export 3MF'}
             </button>
           </div>
         </header>
         <ImageControls surfaceAspect={customSurfaceAspect} mapping={mapping} mappedPreviewUrl={mappedPreviewUrl} onImageChange={loadImage} onMappingChange={commitMapping} />
-        <ShapeControls source={modelSource} onSourceChange={changeModelSource}
-          customControls={<CustomModelControls model={customModel} settings={customSettings} loading={modelLoading} error={modelError} onLoad={loadModel} onChange={commitCustomSettings} />}
+        <ShapeControls sourceLocked={projectionEditing} source={modelSource} onSourceChange={changeModelSource}
+          customControls={<CustomModelControls placementEditing={projectionEditing} model={customModel} settings={customSettings} loading={modelLoading} error={modelError} onLoad={loadModel} onChange={commitCustomSettings} />}
           settings={shape} imageAspectRatio={imageAspectRatio} onChange={commitShape} />
         {paletteLocked && <p className="helper-copy">{importedPainting ? 'The imported physical and virtual extruders are preserved. Use Clear all painting to unlock the filament setup.' : 'Filament mapping is locked while textures are baked. Clear baked textures in the projection menu to change it.'} Painting is kept in this tab until reload.</p>}
-        <fieldset className={`palette-lock${importedPainting ? ' imported-palette' : ''}`} disabled={paletteLocked}>
+        <fieldset className={`palette-lock${importedPainting ? ' imported-palette' : ''}`} disabled={paletteLocked || projectionEditing}>
         <PaletteControls
           importedSetup={customModel?.extruderSetup} importedMaterials={customModel?.materials}
           colorCount={colorCount}
@@ -667,9 +733,9 @@ export default function App() {
         {modelSource === 'simple' && <ReliefControls settings={relief} onChange={commitRelief} />}
       </aside>
       <section className="work-area">
-        <Preview3D mesh={mesh} customSettings={modelSource === 'custom' ? customSettings : undefined}
-          imageAspect={imageAspectRatio} mapping={mapping} onBake={handleBake} onClearBaked={clearBakedTextures} bakedCount={bakedLayers.length} importedPainting={importedPainting} canBake={Boolean(processedCanvas && activeTexture && !(showingExportPreview && exportTarget === 'baked'))} activeTexture={activeTexture && !(showingExportPreview && exportTarget === 'baked')} onMappingChange={commitMapping} onProjectionChange={commitCustomSettings} busy={isBuilding || modelLoading || preparingExport || isExporting} />
-        <ExportPanel
+        <Preview3D projectionEditing={projectionEditing} imageCanvas={processedCanvas} onBeginProjection={beginProjection} onApplyProjection={applyProjection} onCancelProjection={cancelProjection} mesh={mesh} customSettings={modelSource === 'custom' ? customSettings : undefined}
+          imageAspect={imageAspectRatio} mapping={mapping} onBake={handleBake} onClearBaked={clearBakedTextures} bakedCount={bakedLayers.length} importedPainting={importedPainting} canBake={Boolean(!projectionEditing && processedCanvas && activeTexture && !(showingExportPreview && exportTarget === 'baked'))} activeTexture={activeTexture && !(showingExportPreview && exportTarget === 'baked')} onMappingChange={commitMapping} busy={imageLoading || isBuilding || modelLoading || preparingExport || isExporting} />
+        <ExportPanel editingProjection={projectionEditing}
           exportTarget={exportTarget} onExportTargetChange={setExportTarget} hasBakedTexture={bakedLayers.length > 0 || importedPainting} importedPainting={importedPainting}
           customModel={modelSource === 'custom'}
           customSettings={customExportSettings}
@@ -678,7 +744,7 @@ export default function App() {
           showingExportPreview={modelSource === 'custom' && showingExportPreview}
           onPreviewExport={handlePreviewExport}
           onCancelPreparation={cancelExportPreparation}
-          canExport={!isBuilding && !modelLoading && (modelSource === 'custom' ? Boolean(mesh) : Boolean(mesh || processedCanvas))}
+          canExport={!projectionEditing && !imageLoading && !isBuilding && !modelLoading && (modelSource === 'custom' ? Boolean(mesh) : Boolean(mesh || processedCanvas))}
           isExporting={isExporting}
           triangleCount={mesh?.triangles.length ?? 0}
           paintLeafCount={mesh?.paintLeafCount}
